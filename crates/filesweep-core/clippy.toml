@@ -1,0 +1,28 @@
+# The scanner only reads. Every std call that changes the file system is
+# rejected here; test fixtures lift the ban with
+# #![allow(clippy::disallowed_methods)].
+disallowed-methods = [
+    { path = "std::fs::copy", reason = "the scanner never changes the disk" },
+    { path = "std::fs::create_dir", reason = "the scanner never changes the disk" },
+    { path = "std::fs::create_dir_all", reason = "the scanner never changes the disk" },
+    { path = "std::fs::hard_link", reason = "the scanner never changes the disk" },
+    { path = "std::fs::remove_dir", reason = "the scanner never changes the disk" },
+    { path = "std::fs::remove_dir_all", reason = "the scanner never changes the disk" },
+    { path = "std::fs::remove_file", reason = "the scanner never changes the disk" },
+    { path = "std::fs::rename", reason = "the scanner never changes the disk" },
+    { path = "std::fs::set_permissions", reason = "the scanner never changes the disk" },
+    { path = "std::fs::soft_link", reason = "the scanner never changes the disk" },
+    { path = "std::fs::write", reason = "the scanner never changes the disk" },
+    { path = "std::fs::DirBuilder::create", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::create", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::create_new", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::set_len", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::set_modified", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::set_permissions", reason = "the scanner never changes the disk" },
+    { path = "std::fs::File::set_times", reason = "the scanner never changes the disk" },
+    { path = "std::fs::OpenOptions::append", reason = "the scanner never changes the disk" },
+    { path = "std::fs::OpenOptions::create", reason = "the scanner never changes the disk" },
+    { path = "std::fs::OpenOptions::create_new", reason = "the scanner never changes the disk" },
+    { path = "std::fs::OpenOptions::truncate", reason = "the scanner never changes the disk" },
+    { path = "std::fs::OpenOptions::write", reason = "the scanner never changes the disk" },
+]

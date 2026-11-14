@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # rust-toolchain.toml names the version, but rustup does not promise to
+      # fetch it on first use. With no arguments this installs what the file asks for.
+      - name: toolchain
+        run: rustup toolchain install
+
+      - name: format
+        run: cargo fmt --check
+
+      # --locked fails the run when Cargo.lock no longer matches the manifests,
+      # instead of quietly resolving again.
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --locked
+
+      - name: build
+        run: cargo build --locked --release

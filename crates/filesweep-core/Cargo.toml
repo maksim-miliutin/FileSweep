@@ -1,0 +1,12 @@
+[package]
+name = "filesweep-core"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only duplicate file scanner behind FileSweep"
+publish = false
+
+[dependencies]
+blake3 = "1.8"
+
+[dev-dependencies]
+tempfile = "3"
