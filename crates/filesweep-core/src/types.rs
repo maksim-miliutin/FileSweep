@@ -140,6 +140,16 @@ pub struct IoFailure {
     pub message: String,
 }
 
+impl IoFailure {
+    pub(crate) fn from_error(err: &io::Error) -> Self {
+        Self {
+            kind: err.kind(),
+            os_code: err.raw_os_error(),
+            message: err.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanSummary {
     pub outcome: Outcome,
@@ -202,6 +212,20 @@ mod tests {
         let policy = ScanPolicy::default();
         assert!(!policy.include_hidden);
         assert!(!policy.include_system);
+    }
+
+    #[test]
+    fn io_failure_keeps_kind_os_code_and_message() {
+        let plain = IoFailure::from_error(&io::Error::other("boom"));
+        assert_eq!(plain.kind, io::ErrorKind::Other);
+        assert_eq!(plain.os_code, None);
+        assert_eq!(plain.message, "boom");
+
+        let from_os = io::Error::from_raw_os_error(5);
+        let kept = IoFailure::from_error(&from_os);
+        assert_eq!(kept.os_code, Some(5));
+        assert_eq!(kept.kind, from_os.kind());
+        assert_eq!(kept.message, from_os.to_string());
     }
 
     #[test]

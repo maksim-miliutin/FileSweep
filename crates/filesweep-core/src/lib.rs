@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 mod control;
+mod disk;
+mod platform;
 mod types;
 
 pub use control::ScanControl;
