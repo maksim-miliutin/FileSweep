@@ -47,6 +47,31 @@ impl Tree {
 
         path
     }
+
+    /// A symlink at `rel` that points to `target`. Both are inside the tree,
+    /// and the target does not have to exist.
+    #[cfg(unix)]
+    pub fn symlink(&self, target: impl AsRef<Path>, rel: impl AsRef<Path>) -> PathBuf {
+        let path = self.root().join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create the folders above a fixture link");
+        }
+        std::os::unix::fs::symlink(self.root().join(target), &path)
+            .expect("create a fixture symlink");
+
+        path
+    }
+
+    /// A file the platform treats as hidden. On Unix that is a leading dot,
+    /// so the returned path differs from `rel`.
+    #[cfg(unix)]
+    pub fn hidden_file(&self, rel: impl AsRef<Path>, bytes: &[u8]) -> PathBuf {
+        let rel = rel.as_ref();
+        let mut dotted = std::ffi::OsString::from(".");
+        dotted.push(rel.file_name().expect("a hidden file needs a name"));
+
+        self.file(rel.with_file_name(dotted), bytes)
+    }
 }
 
 impl Default for Tree {

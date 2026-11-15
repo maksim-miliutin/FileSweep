@@ -10,6 +10,8 @@ mod disk;
 mod events;
 mod platform;
 mod scan;
+#[cfg(test)]
+mod testkit;
 mod types;
 mod walk;
 

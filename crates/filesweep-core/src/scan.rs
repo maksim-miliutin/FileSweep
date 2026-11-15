@@ -29,7 +29,7 @@ pub(crate) fn scan_with_disk(
     }
 
     let mut events = Events::new(sink);
-    let walked = walk(&request.roots, disk, &mut events);
+    let walked = walk(&request.roots, &request.policy, disk, &mut events);
 
     Ok(ScanSummary {
         outcome: Outcome::Completed,
