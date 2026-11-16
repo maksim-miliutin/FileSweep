@@ -7,7 +7,9 @@ use crate::control::ScanControl;
 use crate::disk::{Disk, EntryInfo, Listed, OpenFile};
 use crate::platform::EntryFlags;
 use crate::scan::scan_with_disk;
-use crate::types::{FileIdentity, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip};
+use crate::types::{
+    DuplicateGroup, FileIdentity, Progress, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
+};
 
 /// Wraps a real disk, changes what it reports for chosen paths, and counts
 /// what the scanner asks for.
@@ -69,7 +71,9 @@ impl<D: Disk> Disk for Faulty<D> {
 }
 
 pub(crate) struct Seen {
+    pub groups: Vec<DuplicateGroup>,
     pub skipped: Vec<Skip>,
+    pub progress: Vec<Progress>,
     pub summary: ScanSummary,
 }
 
@@ -78,19 +82,32 @@ pub(crate) fn collect(disk: &dyn Disk, roots: &[&Path], policy: ScanPolicy) -> S
         roots: roots.iter().map(|root| root.to_path_buf()).collect(),
         policy,
     };
+    let mut groups = Vec::new();
     let mut skipped = Vec::new();
+    let mut progress = Vec::new();
 
     let summary = scan_with_disk(
         &request,
         &ScanControl::new(),
-        &mut |event| {
-            if let ScanEvent::Skipped(skip) = event {
-                skipped.push(skip);
-            }
+        &mut |event| match event {
+            ScanEvent::Group(group) => groups.push(group),
+            ScanEvent::Skipped(skip) => skipped.push(skip),
+            ScanEvent::Progress(step) => progress.push(step),
         },
         disk,
     )
     .expect("the request names at least one root");
 
-    Seen { skipped, summary }
+    Seen {
+        groups,
+        skipped,
+        progress,
+        summary,
+    }
+}
+
+/// Bytes that differ from one position to the next, so a shifted or cut-off
+/// read cannot pass for the original.
+pub(crate) fn pattern(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i % 251) as u8).collect()
 }

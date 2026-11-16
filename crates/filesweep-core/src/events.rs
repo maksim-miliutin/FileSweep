@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::types::{Progress, ScanEvent, Skip, SkipReason};
+use crate::types::{DuplicateGroup, Progress, ScanEvent, Skip, SkipReason};
 
 pub(crate) struct Events<'a> {
     sink: &'a mut dyn FnMut(ScanEvent),
@@ -21,6 +21,10 @@ impl<'a> Events<'a> {
     pub(crate) fn skip(&mut self, path: PathBuf, reason: SkipReason) {
         self.skipped += 1;
         (self.sink)(ScanEvent::Skipped(Skip { path, reason }));
+    }
+
+    pub(crate) fn group(&mut self, group: DuplicateGroup) {
+        (self.sink)(ScanEvent::Group(group));
     }
 
     pub(crate) fn skipped(&self) -> u64 {

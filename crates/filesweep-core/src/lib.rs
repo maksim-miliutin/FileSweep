@@ -8,6 +8,7 @@
 mod control;
 mod disk;
 mod events;
+mod hashing;
 mod platform;
 mod scan;
 #[cfg(test)]

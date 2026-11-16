@@ -1,6 +1,7 @@
 use crate::control::ScanControl;
 use crate::disk::{Disk, StdDisk};
 use crate::events::Events;
+use crate::hashing::find_groups;
 use crate::types::{Outcome, RequestError, ScanEvent, ScanRequest, ScanSummary};
 use crate::walk::walk;
 
@@ -30,16 +31,18 @@ pub(crate) fn scan_with_disk(
 
     let mut events = Events::new(sink);
     let walked = walk(&request.roots, &request.policy, disk, &mut events);
+    let files_seen = walked.index.len() as u64;
+    let hashed = find_groups(walked.index, disk, &mut events);
 
     Ok(ScanSummary {
         outcome: Outcome::Completed,
-        files_seen: walked.index.len() as u64,
+        files_seen,
         empty_files: walked.empty_files,
-        candidates: 0,
-        files_hashed: 0,
-        bytes_hashed: 0,
-        groups: 0,
-        reclaimable_bytes: 0,
+        candidates: hashed.candidates,
+        files_hashed: hashed.files_hashed,
+        bytes_hashed: hashed.bytes_hashed,
+        groups: hashed.groups,
+        reclaimable_bytes: hashed.reclaimable_bytes,
         skipped: events.skipped(),
     })
 }

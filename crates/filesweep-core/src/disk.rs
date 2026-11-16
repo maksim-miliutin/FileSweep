@@ -2,9 +2,6 @@
 //! front of the real disk and produce what a temporary directory cannot: a
 //! refused folder, a file that changes while it is read, a cloud placeholder.
 
-// Nothing reaches the seam until the walk and the hashing land.
-#![allow(dead_code)]
-
 use std::ffi::OsStr;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};

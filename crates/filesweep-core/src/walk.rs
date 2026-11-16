@@ -8,8 +8,6 @@ use crate::events::Events;
 use crate::platform::skip_reason;
 use crate::types::{FileIdentity, Progress, ScanPolicy, SkipReason};
 
-// Read by the hashing phase once it lands.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Indexed {
     pub path: PathBuf,
