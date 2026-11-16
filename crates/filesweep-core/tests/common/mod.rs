@@ -48,6 +48,17 @@ impl Tree {
         path
     }
 
+    /// A second name for the file at `from`. Both are inside the tree.
+    pub fn hard_link(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> PathBuf {
+        let path = self.root().join(to);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create the folders above a fixture link");
+        }
+        fs::hard_link(self.root().join(from), &path).expect("create a fixture hard link");
+
+        path
+    }
+
     /// A symlink at `rel` that points to `target`. Both are inside the tree,
     /// and the target does not have to exist.
     #[cfg(unix)]

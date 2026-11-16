@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -6,7 +6,8 @@ use crate::disk::{Disk, OpenFile};
 use crate::events::Events;
 use crate::platform::skip_reason;
 use crate::types::{
-    ContentHash, DuplicateFile, DuplicateGroup, FileStamp, Independence, Progress, SkipReason,
+    ContentHash, DuplicateFile, DuplicateGroup, FileIdentity, FileStamp, Independence, Progress,
+    SkipReason,
 };
 use crate::walk::Indexed;
 
@@ -90,30 +91,37 @@ struct Hashing<'a, 'e> {
 impl Hashing<'_, '_> {
     /// All the candidates of one size.
     fn bucket(&mut self, size: u64, paths: Vec<PathBuf>) {
+        let files = self.physical_files(size, paths);
+
+        // One physical file has nothing to be compared with, however many
+        // names led to it.
+        if files.len() < 2 {
+            for _ in &files {
+                self.done(size);
+            }
+            return;
+        }
+
         // Files with equal content, in the order the first of each was met.
         let mut classes: Vec<(ContentHash, Vec<DuplicateFile>)> = Vec::new();
         let mut class_of: HashMap<ContentHash, usize> = HashMap::new();
 
-        for path in paths {
-            let done_after = self.tally.bytes_done.saturating_add(size);
+        for file in files {
+            let start = self.tally.bytes_done;
 
-            match self.read(&path, done_after) {
-                Ok((hash, stamp)) => {
+            match self.read(&file.paths[0], start.saturating_add(size)) {
+                Ok(hash) => {
                     let class = *class_of.entry(hash).or_insert_with(|| {
                         classes.push((hash, Vec::new()));
                         classes.len() - 1
                     });
-                    classes[class].1.push(DuplicateFile {
-                        paths: vec![path],
-                        stamp,
-                    });
+                    classes[class].1.push(file);
                 }
-                Err(reason) => self.events.skip(path, reason),
+                Err(reason) => self.events.skip(file.paths[0].clone(), reason),
             }
 
-            self.tally.files_done += 1;
-            self.tally.bytes_done = done_after;
-            self.report();
+            self.tally.bytes_done = start;
+            self.done(size);
         }
 
         for (hash, files) in classes {
@@ -123,11 +131,70 @@ impl Hashing<'_, '_> {
         }
     }
 
-    /// `bytes_done` never passes `ceiling`, so a file that grew since it was
-    /// listed cannot push the progress past its total.
-    fn read(&mut self, path: &Path, ceiling: u64) -> Result<(ContentHash, FileStamp), SkipReason> {
+    /// Pass one: learns which physical file each candidate is. The names of
+    /// one file are folded together, and a path the index holds twice is taken
+    /// once. Only one file is open at a time, however large the bucket.
+    fn physical_files(&mut self, size: u64, paths: Vec<PathBuf>) -> Vec<DuplicateFile> {
+        let first_mention: Vec<bool> = {
+            let mut seen = HashSet::with_capacity(paths.len());
+            paths
+                .iter()
+                .map(|path| seen.insert(path.as_path()))
+                .collect()
+        };
+
+        let mut files: Vec<DuplicateFile> = Vec::new();
+        let mut file_of: HashMap<FileIdentity, usize> = HashMap::new();
+
+        for (path, first_mention) in paths.into_iter().zip(first_mention) {
+            if !first_mention {
+                self.done(size);
+                continue;
+            }
+
+            let stamp = match self.stamp(&path) {
+                Ok(stamp) => stamp,
+                Err(reason) => {
+                    self.events.skip(path, reason);
+                    self.done(size);
+                    continue;
+                }
+            };
+
+            let known = stamp
+                .identity
+                .and_then(|identity| file_of.get(&identity).copied());
+            match known {
+                Some(file) => {
+                    files[file].paths.push(path);
+                    self.done(size);
+                }
+                None => {
+                    if let Some(identity) = stamp.identity {
+                        file_of.insert(identity, files.len());
+                    }
+                    files.push(DuplicateFile {
+                        paths: vec![path],
+                        stamp,
+                    });
+                }
+            }
+        }
+
+        files
+    }
+
+    fn stamp(&self, path: &Path) -> Result<FileStamp, SkipReason> {
         let mut file = self.disk.open(path).map_err(refused)?;
-        let stamp = file.stamp().map_err(refused)?;
+
+        file.stamp().map_err(refused)
+    }
+
+    /// Pass two: hashes one physical file. `bytes_done` never passes `ceiling`,
+    /// so a file that grew since it was listed cannot push the progress past
+    /// its total.
+    fn read(&mut self, path: &Path, ceiling: u64) -> Result<ContentHash, SkipReason> {
+        let mut file = self.disk.open(path).map_err(refused)?;
 
         let tally = &mut self.tally;
         let events = &mut *self.events;
@@ -141,12 +208,11 @@ impl Hashing<'_, '_> {
 
         self.hashed.files_hashed += 1;
 
-        Ok((hash, stamp))
+        Ok(hash)
     }
 
     fn group(&mut self, size: u64, hash: ContentHash, files: Vec<DuplicateFile>) {
-        let extra_copies = (files.len() as u64).saturating_sub(1);
-        let reclaimable_bytes = size.saturating_mul(extra_copies);
+        let (independence, reclaimable_bytes) = reclaimable(size, &files);
 
         self.hashed.groups += 1;
         self.hashed.reclaimable_bytes = self
@@ -157,9 +223,15 @@ impl Hashing<'_, '_> {
             size,
             hash,
             files,
-            independence: Independence::Verified,
+            independence,
             reclaimable_bytes,
         });
+    }
+
+    fn done(&mut self, size: u64) {
+        self.tally.files_done += 1;
+        self.tally.bytes_done = self.tally.bytes_done.saturating_add(size);
+        self.report();
     }
 
     fn report(&mut self) {
@@ -169,6 +241,25 @@ impl Hashing<'_, '_> {
 
 fn refused(err: io::Error) -> SkipReason {
     skip_reason(&err)
+}
+
+/// The least that removing the extra copies would give back. One file always
+/// stays. A file with a name outside the scan keeps its bytes on disk after
+/// every name the scan knows is gone, so it gives nothing back. And unless
+/// every file has an identity, two of them may be one file: then nothing is
+/// promised at all.
+fn reclaimable(size: u64, files: &[DuplicateFile]) -> (Independence, u64) {
+    if files.iter().any(|file| file.stamp.identity.is_none()) {
+        return (Independence::Unverified, 0);
+    }
+
+    let seen_in_full = files
+        .iter()
+        .filter(|file| file.stamp.link_count == Some(file.paths.len() as u64))
+        .count() as u64;
+    let removable = seen_in_full.min((files.len() as u64).saturating_sub(1));
+
+    (Independence::Verified, size.saturating_mul(removable))
 }
 
 /// Calls `on_block` with the size of each piece as it is read. Returns the
@@ -204,7 +295,7 @@ mod tests {
 
     use super::*;
     use crate::disk::StdDisk;
-    use crate::testkit::{collect, pattern};
+    use crate::testkit::{Faulty, collect, pattern};
     use crate::types::{Progress, ScanPolicy};
 
     fn hash_file(path: &Path) -> (ContentHash, u64, Vec<u64>) {
@@ -317,5 +408,88 @@ mod tests {
             Progress::Hashing { bytes_done, .. } => *bytes_done <= total,
             Progress::Walking { .. } => true,
         }));
+    }
+
+    fn two_copies() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a.bin"), dir.path().join("b.bin"));
+        fs::write(&a, pattern(1000)).unwrap();
+        fs::write(&b, pattern(1000)).unwrap();
+
+        (dir, a, b)
+    }
+
+    #[test]
+    fn unknown_identity_makes_the_group_unverified_with_zero_reclaimable() {
+        let (dir, a, _) = two_copies();
+        let disk = Faulty::new(StdDisk).no_identity(&a);
+
+        let seen = collect(&disk, &[dir.path()], ScanPolicy::default());
+
+        assert_eq!(seen.groups.len(), 1);
+        let group = &seen.groups[0];
+        assert_eq!(group.files.len(), 2);
+        assert_eq!(group.files[0].stamp.identity, None);
+        assert_eq!(group.independence, Independence::Unverified);
+        assert_eq!(group.reclaimable_bytes, 0);
+        assert_eq!(seen.summary.reclaimable_bytes, 0);
+    }
+
+    // Guards against a file becoming its own duplicate. With no folder
+    // identity the walk cannot tell it entered one folder twice, and with no
+    // file identity the two index entries of a path look like two files.
+    #[test]
+    fn a_path_indexed_twice_is_one_candidate() {
+        let (dir, a, b) = two_copies();
+        let disk = Faulty::new(StdDisk)
+            .no_identity(dir.path())
+            .no_identity(&a)
+            .no_identity(&b);
+
+        let seen = collect(&disk, &[dir.path(), dir.path()], ScanPolicy::default());
+
+        assert_eq!(seen.summary.files_seen, 4);
+        assert_eq!(seen.groups.len(), 1);
+        let names: Vec<&[PathBuf]> = seen.groups[0]
+            .files
+            .iter()
+            .map(|file| file.paths.as_slice())
+            .collect();
+        assert_eq!(names, [[a], [b]]);
+    }
+
+    #[test]
+    fn a_file_listed_twice_with_no_other_twin_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let only = dir.path().join("only.bin");
+        fs::write(&only, pattern(1000)).unwrap();
+        let disk = Faulty::new(StdDisk)
+            .no_identity(dir.path())
+            .no_identity(&only);
+
+        let seen = collect(&disk, &[dir.path(), dir.path()], ScanPolicy::default());
+
+        assert!(seen.groups.is_empty(), "groups: {:?}", seen.groups);
+        assert_eq!(seen.summary.files_hashed, 0);
+    }
+
+    #[test]
+    fn large_bucket_keeps_at_most_two_files_open() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..300_u32 {
+            let content = [(i % 3) as u8; 64];
+            fs::write(dir.path().join(format!("{i:03}")), content).unwrap();
+        }
+        let disk = Faulty::new(StdDisk);
+
+        let seen = collect(&disk, &[dir.path()], ScanPolicy::default());
+
+        assert_eq!(seen.summary.files_hashed, 300);
+        assert_eq!(seen.groups.len(), 3);
+        assert!(
+            (1..=2).contains(&disk.max_open()),
+            "open at once: {}",
+            disk.max_open()
+        );
     }
 }

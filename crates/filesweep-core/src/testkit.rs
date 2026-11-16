@@ -1,14 +1,16 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::control::ScanControl;
 use crate::disk::{Disk, EntryInfo, Listed, OpenFile};
 use crate::platform::EntryFlags;
 use crate::scan::scan_with_disk;
 use crate::types::{
-    DuplicateGroup, FileIdentity, Progress, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
+    DuplicateGroup, FileIdentity, FileStamp, Progress, ScanEvent, ScanPolicy, ScanRequest,
+    ScanSummary, Skip,
 };
 
 /// Wraps a real disk, changes what it reports for chosen paths, and counts
@@ -16,7 +18,10 @@ use crate::types::{
 pub(crate) struct Faulty<D: Disk> {
     inner: D,
     flags: HashMap<PathBuf, EntryFlags>,
+    no_identity: HashSet<PathBuf>,
     opened: RefCell<HashMap<PathBuf, usize>>,
+    open_now: Rc<Cell<usize>>,
+    max_open: Cell<usize>,
 }
 
 impl<D: Disk> Faulty<D> {
@@ -24,7 +29,10 @@ impl<D: Disk> Faulty<D> {
         Self {
             inner,
             flags: HashMap::new(),
+            no_identity: HashSet::new(),
             opened: RefCell::new(HashMap::new()),
+            open_now: Rc::new(Cell::new(0)),
+            max_open: Cell::new(0),
         }
     }
 
@@ -33,8 +41,18 @@ impl<D: Disk> Faulty<D> {
         self
     }
 
+    /// `path` reports no identity, both as a folder and as an open file.
+    pub(crate) fn no_identity(mut self, path: &Path) -> Self {
+        self.no_identity.insert(path.to_path_buf());
+        self
+    }
+
     pub(crate) fn opened(&self, path: &Path) -> usize {
         self.opened.borrow().get(path).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn max_open(&self) -> usize {
+        self.max_open.get()
     }
 }
 
@@ -56,6 +74,10 @@ impl<D: Disk> Disk for Faulty<D> {
     }
 
     fn dir_identity(&self, dir: &Path) -> Option<FileIdentity> {
+        if self.no_identity.contains(dir) {
+            return None;
+        }
+
         self.inner.dir_identity(dir)
     }
 
@@ -66,7 +88,43 @@ impl<D: Disk> Disk for Faulty<D> {
             .entry(path.to_path_buf())
             .or_default() += 1;
 
-        self.inner.open(path)
+        let inner = self.inner.open(path)?;
+        self.open_now.set(self.open_now.get() + 1);
+        self.max_open
+            .set(self.max_open.get().max(self.open_now.get()));
+
+        Ok(Box::new(FaultyFile {
+            inner,
+            no_identity: self.no_identity.contains(path),
+            open_now: Rc::clone(&self.open_now),
+        }))
+    }
+}
+
+struct FaultyFile {
+    inner: Box<dyn OpenFile>,
+    no_identity: bool,
+    open_now: Rc<Cell<usize>>,
+}
+
+impl OpenFile for FaultyFile {
+    fn stamp(&mut self) -> io::Result<FileStamp> {
+        let mut stamp = self.inner.stamp()?;
+        if self.no_identity {
+            stamp.identity = None;
+        }
+
+        Ok(stamp)
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl Drop for FaultyFile {
+    fn drop(&mut self) {
+        self.open_now.set(self.open_now.get() - 1);
     }
 }
 
