@@ -106,11 +106,12 @@ impl Hashing<'_, '_> {
         let mut classes: Vec<(ContentHash, Vec<DuplicateFile>)> = Vec::new();
         let mut class_of: HashMap<ContentHash, usize> = HashMap::new();
 
-        for file in files {
+        for mut file in files {
             let start = self.tally.bytes_done;
 
-            match self.read(&file.paths[0], start.saturating_add(size)) {
-                Ok(hash) => {
+            match self.read(&file.paths[0], &file.stamp, start.saturating_add(size)) {
+                Ok((hash, after_read)) => {
+                    file.stamp = after_read;
                     let class = *class_of.entry(hash).or_insert_with(|| {
                         classes.push((hash, Vec::new()));
                         classes.len() - 1
@@ -152,7 +153,7 @@ impl Hashing<'_, '_> {
                 continue;
             }
 
-            let stamp = match self.stamp(&path) {
+            let stamp = match self.stamp(&path, size) {
                 Ok(stamp) => stamp,
                 Err(reason) => {
                     self.events.skip(path, reason);
@@ -184,31 +185,57 @@ impl Hashing<'_, '_> {
         files
     }
 
-    fn stamp(&self, path: &Path) -> Result<FileStamp, SkipReason> {
+    fn stamp(&self, path: &Path, listed_size: u64) -> Result<FileStamp, SkipReason> {
         let mut file = self.disk.open(path).map_err(refused)?;
+        let stamp = file.stamp().map_err(refused)?;
 
-        file.stamp().map_err(refused)
+        // The listing can lag behind the file, and the path can lead to
+        // another file by now. Either way this is not the file that was listed.
+        if stamp.size != listed_size {
+            return Err(SkipReason::Changed);
+        }
+
+        Ok(stamp)
     }
 
-    /// Pass two: hashes one physical file. `bytes_done` never passes `ceiling`,
-    /// so a file that grew since it was listed cannot push the progress past
-    /// its total.
-    fn read(&mut self, path: &Path, ceiling: u64) -> Result<ContentHash, SkipReason> {
+    /// Pass two: hashes one physical file. The handle is stamped before and
+    /// after the read: the first stamp must agree with the first look at the
+    /// file, the second with the first, and the bytes read with the size.
+    /// Otherwise the hash may describe bytes that were never on disk together.
+    ///
+    /// `bytes_done` never passes `ceiling`, so a file that grew cannot push the
+    /// progress past its total.
+    fn read(
+        &mut self,
+        path: &Path,
+        first_look: &FileStamp,
+        ceiling: u64,
+    ) -> Result<(ContentHash, FileStamp), SkipReason> {
         let mut file = self.disk.open(path).map_err(refused)?;
+
+        let before = file.stamp().map_err(refused)?;
+        if !same_content_state(first_look, &before) {
+            return Err(SkipReason::Changed);
+        }
 
         let tally = &mut self.tally;
         let events = &mut *self.events;
         let bytes_hashed = &mut self.hashed.bytes_hashed;
-        let (hash, _) = hash_reader(file.as_mut(), &mut self.buffer, &mut |block| {
+        let (hash, read) = hash_reader(file.as_mut(), &mut self.buffer, &mut |block| {
             *bytes_hashed += block;
             tally.bytes_done = tally.bytes_done.saturating_add(block).min(ceiling);
             events.progress(tally.progress());
         })
         .map_err(refused)?;
 
+        let after = file.stamp().map_err(refused)?;
+        if read != before.size || !same_content_state(&before, &after) {
+            return Err(SkipReason::Changed);
+        }
+
         self.hashed.files_hashed += 1;
 
-        Ok(hash)
+        Ok((hash, after))
     }
 
     fn group(&mut self, size: u64, hash: ContentHash, files: Vec<DuplicateFile>) {
@@ -241,6 +268,12 @@ impl Hashing<'_, '_> {
 
 fn refused(err: io::Error) -> SkipReason {
     skip_reason(&err)
+}
+
+/// The number of names is left out: a new name for a file is not a change of
+/// what is in it.
+fn same_content_state(a: &FileStamp, b: &FileStamp) -> bool {
+    a.identity == b.identity && a.size == b.size && a.modified == b.modified
 }
 
 /// The least that removing the extra copies would give back. One file always
