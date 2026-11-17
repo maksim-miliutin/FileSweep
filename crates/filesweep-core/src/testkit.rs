@@ -25,6 +25,8 @@ struct Faults {
     /// How many bytes are read before the error starts.
     read_error_after: Option<(u64, fn() -> io::Error)>,
     truncate_reads_at: Option<u64>,
+    on_list: Option<Rc<dyn Fn()>>,
+    on_read: Option<Rc<dyn Fn(usize)>>,
 }
 
 /// Wraps a real disk, changes what it reports for chosen paths, and counts
@@ -36,6 +38,8 @@ pub(crate) struct Faulty<D: Disk> {
     stamped: RefCell<HashMap<PathBuf, Rc<Cell<usize>>>>,
     open_now: Rc<Cell<usize>>,
     max_open: Cell<usize>,
+    listed: RefCell<HashMap<PathBuf, usize>>,
+    bytes_read: Rc<Cell<u64>>,
 }
 
 impl<D: Disk> Faulty<D> {
@@ -47,6 +51,8 @@ impl<D: Disk> Faulty<D> {
             stamped: RefCell::new(HashMap::new()),
             open_now: Rc::new(Cell::new(0)),
             max_open: Cell::new(0),
+            listed: RefCell::new(HashMap::new()),
+            bytes_read: Rc::new(Cell::new(0)),
         }
     }
 
@@ -122,6 +128,19 @@ impl<D: Disk> Faulty<D> {
         self
     }
 
+    /// `hook` runs each time the folder `dir` is about to be listed.
+    pub(crate) fn on_list(mut self, dir: &Path, hook: impl Fn() + 'static) -> Self {
+        self.at(dir).on_list = Some(Rc::new(hook));
+        self
+    }
+
+    /// `hook` runs after each read of `path`, with the number of reads that
+    /// came before it on the same handle.
+    pub(crate) fn on_read(mut self, path: &Path, hook: impl Fn(usize) + 'static) -> Self {
+        self.at(path).on_read = Some(Rc::new(hook));
+        self
+    }
+
     /// How many times `path` was opened, failed attempts included.
     pub(crate) fn opened(&self, path: &Path) -> usize {
         self.opened.borrow().get(path).copied().unwrap_or(0)
@@ -130,11 +149,29 @@ impl<D: Disk> Faulty<D> {
     pub(crate) fn max_open(&self) -> usize {
         self.max_open.get()
     }
+
+    /// How many times the folder `dir` was listed, failed attempts included.
+    pub(crate) fn listed(&self, dir: &Path) -> usize {
+        self.listed.borrow().get(dir).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn bytes_read(&self) -> u64 {
+        self.bytes_read.get()
+    }
 }
 
 impl<D: Disk> Disk for Faulty<D> {
     fn list_dir(&self, dir: &Path) -> io::Result<Vec<Listed>> {
-        if let Some(make) = self.faults_of(dir).list_error {
+        let faults = self.faults_of(dir);
+        *self
+            .listed
+            .borrow_mut()
+            .entry(dir.to_path_buf())
+            .or_default() += 1;
+        if let Some(hook) = &faults.on_list {
+            hook();
+        }
+        if let Some(make) = faults.list_error {
             return Err(make());
         }
 
@@ -194,6 +231,8 @@ impl<D: Disk> Disk for Faulty<D> {
             faults,
             stamp_calls,
             consumed: 0,
+            read_calls: 0,
+            bytes_read: Rc::clone(&self.bytes_read),
             open_now: Rc::clone(&self.open_now),
         }))
     }
@@ -204,6 +243,8 @@ struct FaultyFile {
     faults: Faults,
     stamp_calls: Rc<Cell<usize>>,
     consumed: u64,
+    read_calls: usize,
+    bytes_read: Rc<Cell<u64>>,
     open_now: Rc<Cell<usize>>,
 }
 
@@ -240,6 +281,11 @@ impl OpenFile for FaultyFile {
 
         let read = self.inner.read(&mut buf[..limit])?;
         self.consumed += read as u64;
+        self.bytes_read.set(self.bytes_read.get() + read as u64);
+        if let Some(hook) = &self.faults.on_read {
+            hook(self.read_calls);
+        }
+        self.read_calls += 1;
 
         Ok(read)
     }
@@ -259,6 +305,15 @@ pub(crate) struct Seen {
 }
 
 pub(crate) fn collect(disk: &dyn Disk, roots: &[&Path], policy: ScanPolicy) -> Seen {
+    collect_with(&ScanControl::new(), disk, roots, policy)
+}
+
+pub(crate) fn collect_with(
+    control: &ScanControl,
+    disk: &dyn Disk,
+    roots: &[&Path],
+    policy: ScanPolicy,
+) -> Seen {
     let request = ScanRequest {
         roots: roots.iter().map(|root| root.to_path_buf()).collect(),
         policy,
@@ -269,7 +324,7 @@ pub(crate) fn collect(disk: &dyn Disk, roots: &[&Path], policy: ScanPolicy) -> S
 
     let summary = scan_with_disk(
         &request,
-        &ScanControl::new(),
+        control,
         &mut |event| match event {
             ScanEvent::Group(group) => groups.push(group),
             ScanEvent::Skipped(skip) => skipped.push(skip),

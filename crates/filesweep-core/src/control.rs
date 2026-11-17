@@ -2,10 +2,14 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 #[derive(Debug, Default)]
 struct State {
-    // Read by the scan once pausing lands.
-    #[allow(dead_code)]
     paused: bool,
     cancelled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flow {
+    Go,
+    Stop,
 }
 
 /// Clones share one state, so another thread can cancel or pause the scan.
@@ -20,20 +24,45 @@ impl ScanControl {
         Self::default()
     }
 
+    /// Stops the scan for good. It reads at most one more block, reports
+    /// nothing further and returns a summary marked as cancelled. A paused
+    /// scan is woken up to stop.
     pub fn cancel(&self) {
         self.lock().cancelled = true;
+        self.shared.1.notify_all();
     }
 
+    /// Holds the scan at its next block or entry until `resume` or `cancel`.
+    /// A file being read stays open meanwhile.
     pub fn pause(&self) {
         self.lock().paused = true;
     }
 
     pub fn resume(&self) {
         self.lock().paused = false;
+        self.shared.1.notify_all();
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.lock().cancelled
+    }
+
+    /// Blocks while the scan is paused. A cancel always wins over a pause.
+    pub(crate) fn checkpoint(&self) -> Flow {
+        let mut state = self.lock();
+        while state.paused && !state.cancelled {
+            state = self
+                .shared
+                .1
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+
+        if state.cancelled {
+            Flow::Stop
+        } else {
+            Flow::Go
+        }
     }
 
     // A poisoned lock only means a thread panicked between two flag writes.

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::control::{Flow, ScanControl};
 use crate::disk::{Disk, OpenFile};
 use crate::events::Events;
 use crate::platform::skip_reason;
@@ -11,7 +12,8 @@ use crate::types::{
 };
 use crate::walk::Indexed;
 
-/// Bytes read at a time.
+/// Bytes read at a time. Cancel and pause are obeyed between two blocks, so
+/// this is also the most that is read after a cancel.
 pub(crate) const BLOCK_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Default)]
@@ -21,9 +23,15 @@ pub(crate) struct Hashed {
     pub bytes_hashed: u64,
     pub groups: u64,
     pub reclaimable_bytes: u64,
+    pub cancelled: bool,
 }
 
-pub(crate) fn find_groups(index: Vec<Indexed>, disk: &dyn Disk, events: &mut Events<'_>) -> Hashed {
+pub(crate) fn find_groups(
+    index: Vec<Indexed>,
+    disk: &dyn Disk,
+    control: &ScanControl,
+    events: &mut Events<'_>,
+) -> Hashed {
     // A size seen once cannot have a twin, so that file is never opened.
     let mut by_size: BTreeMap<u64, Vec<PathBuf>> = BTreeMap::new();
     for file in index {
@@ -40,6 +48,7 @@ pub(crate) fn find_groups(index: Vec<Indexed>, disk: &dyn Disk, events: &mut Eve
 
     let mut hashing = Hashing {
         disk,
+        control,
         events,
         buffer: vec![0; BLOCK_SIZE],
         tally,
@@ -52,11 +61,28 @@ pub(crate) fn find_groups(index: Vec<Indexed>, disk: &dyn Disk, events: &mut Eve
     hashing.report();
     // Largest first: the big duplicates are what the user came for.
     for (size, paths) in by_size.into_iter().rev() {
-        hashing.bucket(size, paths);
+        if hashing.bucket(size, paths).is_err() {
+            // Nothing more is reported after a cancel.
+            hashing.hashed.cancelled = true;
+            return hashing.hashed;
+        }
     }
     hashing.report();
 
     hashing.hashed
+}
+
+struct Cancelled;
+
+enum Unread {
+    Skip(SkipReason),
+    Cancelled,
+}
+
+impl From<SkipReason> for Unread {
+    fn from(reason: SkipReason) -> Self {
+        Self::Skip(reason)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -80,6 +106,7 @@ impl Tally {
 
 struct Hashing<'a, 'e> {
     disk: &'a dyn Disk,
+    control: &'a ScanControl,
     events: &'a mut Events<'e>,
     /// One buffer for the whole phase. A fresh block per file would cost more
     /// than reading the small files themselves.
@@ -89,9 +116,10 @@ struct Hashing<'a, 'e> {
 }
 
 impl Hashing<'_, '_> {
-    /// All the candidates of one size.
-    fn bucket(&mut self, size: u64, paths: Vec<PathBuf>) {
-        let files = self.physical_files(size, paths);
+    /// All the candidates of one size. A cancel leaves the bucket without
+    /// groups: a group is reported only for a bucket that was read to its end.
+    fn bucket(&mut self, size: u64, paths: Vec<PathBuf>) -> Result<(), Cancelled> {
+        let files = self.physical_files(size, paths)?;
 
         // One physical file has nothing to be compared with, however many
         // names led to it.
@@ -99,7 +127,7 @@ impl Hashing<'_, '_> {
             for _ in &files {
                 self.done(size);
             }
-            return;
+            return Ok(());
         }
 
         // Files with equal content, in the order the first of each was met.
@@ -107,6 +135,7 @@ impl Hashing<'_, '_> {
         let mut class_of: HashMap<ContentHash, usize> = HashMap::new();
 
         for mut file in files {
+            self.checkpoint()?;
             let start = self.tally.bytes_done;
 
             match self.read(&file.paths[0], &file.stamp, start.saturating_add(size)) {
@@ -118,7 +147,8 @@ impl Hashing<'_, '_> {
                     });
                     classes[class].1.push(file);
                 }
-                Err(reason) => self.events.skip(file.paths[0].clone(), reason),
+                Err(Unread::Skip(reason)) => self.events.skip(file.paths[0].clone(), reason),
+                Err(Unread::Cancelled) => return Err(Cancelled),
             }
 
             self.tally.bytes_done = start;
@@ -130,12 +160,18 @@ impl Hashing<'_, '_> {
                 self.group(size, hash, files);
             }
         }
+
+        Ok(())
     }
 
     /// Pass one: learns which physical file each candidate is. The names of
     /// one file are folded together, and a path the index holds twice is taken
     /// once. Only one file is open at a time, however large the bucket.
-    fn physical_files(&mut self, size: u64, paths: Vec<PathBuf>) -> Vec<DuplicateFile> {
+    fn physical_files(
+        &mut self,
+        size: u64,
+        paths: Vec<PathBuf>,
+    ) -> Result<Vec<DuplicateFile>, Cancelled> {
         let first_mention: Vec<bool> = {
             let mut seen = HashSet::with_capacity(paths.len());
             paths
@@ -148,6 +184,8 @@ impl Hashing<'_, '_> {
         let mut file_of: HashMap<FileIdentity, usize> = HashMap::new();
 
         for (path, first_mention) in paths.into_iter().zip(first_mention) {
+            self.checkpoint()?;
+
             if !first_mention {
                 self.done(size);
                 continue;
@@ -182,7 +220,7 @@ impl Hashing<'_, '_> {
             }
         }
 
-        files
+        Ok(files)
     }
 
     fn stamp(&self, path: &Path, listed_size: u64) -> Result<FileStamp, SkipReason> {
@@ -210,27 +248,35 @@ impl Hashing<'_, '_> {
         path: &Path,
         first_look: &FileStamp,
         ceiling: u64,
-    ) -> Result<(ContentHash, FileStamp), SkipReason> {
+    ) -> Result<(ContentHash, FileStamp), Unread> {
         let mut file = self.disk.open(path).map_err(refused)?;
 
         let before = file.stamp().map_err(refused)?;
         if !same_content_state(first_look, &before) {
-            return Err(SkipReason::Changed);
+            return Err(SkipReason::Changed.into());
         }
 
         let tally = &mut self.tally;
         let events = &mut *self.events;
         let bytes_hashed = &mut self.hashed.bytes_hashed;
-        let (hash, read) = hash_reader(file.as_mut(), &mut self.buffer, &mut |block| {
-            *bytes_hashed += block;
-            tally.bytes_done = tally.bytes_done.saturating_add(block).min(ceiling);
-            events.progress(tally.progress());
-        })
+        let hashed = hash_reader(
+            file.as_mut(),
+            &mut self.buffer,
+            self.control,
+            &mut |block| {
+                *bytes_hashed += block;
+                tally.bytes_done = tally.bytes_done.saturating_add(block).min(ceiling);
+                events.progress(tally.progress());
+            },
+        )
         .map_err(refused)?;
+        let Some((hash, read)) = hashed else {
+            return Err(Unread::Cancelled);
+        };
 
         let after = file.stamp().map_err(refused)?;
         if read != before.size || !same_content_state(&before, &after) {
-            return Err(SkipReason::Changed);
+            return Err(SkipReason::Changed.into());
         }
 
         self.hashed.files_hashed += 1;
@@ -259,6 +305,13 @@ impl Hashing<'_, '_> {
         self.tally.files_done += 1;
         self.tally.bytes_done = self.tally.bytes_done.saturating_add(size);
         self.report();
+    }
+
+    fn checkpoint(&self) -> Result<(), Cancelled> {
+        match self.control.checkpoint() {
+            Flow::Go => Ok(()),
+            Flow::Stop => Err(Cancelled),
+        }
     }
 
     fn report(&mut self) {
@@ -296,17 +349,23 @@ fn reclaimable(size: u64, files: &[DuplicateFile]) -> (Independence, u64) {
 }
 
 /// Calls `on_block` with the size of each piece as it is read. Returns the
-/// hash and the number of bytes read.
+/// hash and the number of bytes read, or `None` when the scan was cancelled
+/// before the end of the file.
 pub(crate) fn hash_reader(
     file: &mut dyn OpenFile,
     buffer: &mut [u8],
+    control: &ScanControl,
     on_block: &mut dyn FnMut(u64),
-) -> io::Result<(ContentHash, u64)> {
+) -> io::Result<Option<(ContentHash, u64)>> {
     debug_assert!(!buffer.is_empty(), "an empty buffer reads nothing");
     let mut hasher = blake3::Hasher::new();
     let mut total = 0_u64;
 
     loop {
+        if control.checkpoint() == Flow::Stop {
+            return Ok(None);
+        }
+
         let read = file.read(buffer)?;
         if read == 0 {
             break;
@@ -317,7 +376,7 @@ pub(crate) fn hash_reader(
         on_block(read as u64);
     }
 
-    Ok((ContentHash(*hasher.finalize().as_bytes()), total))
+    Ok(Some((ContentHash(*hasher.finalize().as_bytes()), total)))
 }
 
 #[cfg(test)]
@@ -336,8 +395,14 @@ mod tests {
         let mut buffer = vec![0; BLOCK_SIZE];
         let mut blocks = Vec::new();
 
-        let (hash, read) =
-            hash_reader(file.as_mut(), &mut buffer, &mut |block| blocks.push(block)).unwrap();
+        let (hash, read) = hash_reader(
+            file.as_mut(),
+            &mut buffer,
+            &ScanControl::new(),
+            &mut |block| blocks.push(block),
+        )
+        .unwrap()
+        .expect("nothing cancelled this read");
 
         (hash, read, blocks)
     }

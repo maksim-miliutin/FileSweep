@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 mod control;
+#[cfg(test)]
+mod control_tests;
 mod disk;
 mod events;
 #[cfg(test)]

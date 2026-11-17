@@ -3,10 +3,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use crate::control::{Flow, ScanControl};
 use crate::disk::{Disk, EntryInfo, EntryKind, Listed};
 use crate::events::Events;
 use crate::platform::skip_reason;
-use crate::types::{FileIdentity, Progress, ScanPolicy, SkipReason};
+use crate::types::{FileIdentity, Progress, ScanPolicy, ScanRequest, SkipReason};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Indexed {
@@ -20,17 +21,19 @@ pub(crate) struct Walked {
     /// In walk order: roots as requested, the entries of a folder by name.
     pub index: Vec<Indexed>,
     pub empty_files: u64,
+    pub cancelled: bool,
 }
 
 pub(crate) fn walk(
-    roots: &[PathBuf],
-    policy: &ScanPolicy,
+    request: &ScanRequest,
     disk: &dyn Disk,
+    control: &ScanControl,
     events: &mut Events<'_>,
 ) -> Walked {
     let mut walker = Walker {
         disk,
-        policy,
+        policy: &request.policy,
+        control,
         events,
         visited: HashSet::new(),
         pending: Vec::new(),
@@ -38,10 +41,16 @@ pub(crate) fn walk(
     };
 
     walker.report();
-    for root in roots {
+    for root in &request.roots {
+        if walker.stopped() {
+            break;
+        }
         walker.root(root);
     }
-    walker.report();
+    // Nothing more is reported after a cancel.
+    if !walker.walked.cancelled {
+        walker.report();
+    }
 
     walker.walked
 }
@@ -49,6 +58,7 @@ pub(crate) fn walk(
 struct Walker<'a, 'e> {
     disk: &'a dyn Disk,
     policy: &'a ScanPolicy,
+    control: &'a ScanControl,
     events: &'a mut Events<'e>,
     /// Folders already entered. A second root, or a second name for the same
     /// folder, must not put its files into the index twice.
@@ -89,6 +99,11 @@ impl Walker<'_, '_> {
 
     fn drain(&mut self) {
         loop {
+            if self.stopped() {
+                self.pending.clear();
+                return;
+            }
+
             let Some(entries) = self.pending.last_mut() else {
                 return;
             };
@@ -144,6 +159,15 @@ impl Walker<'_, '_> {
         }
     }
 
+    /// Waits out a pause. True once the scan is cancelled.
+    fn stopped(&mut self) -> bool {
+        if self.control.checkpoint() == Flow::Stop {
+            self.walked.cancelled = true;
+        }
+
+        self.walked.cancelled
+    }
+
     fn report(&mut self) {
         self.events.progress(Progress::Walking {
             files_seen: self.walked.index.len() as u64,
@@ -196,7 +220,12 @@ mod tests {
         let mut sink = |_event: ScanEvent| {};
         let mut events = Events::new(&mut sink);
 
-        walk(roots, &ScanPolicy::default(), &StdDisk, &mut events)
+        let request = ScanRequest {
+            roots: roots.to_vec(),
+            policy: ScanPolicy::default(),
+        };
+
+        walk(&request, &StdDisk, &ScanControl::new(), &mut events)
     }
 
     #[test]
