@@ -30,6 +30,15 @@ cargo test
 cargo build --release
 ```
 
+## Trying the scanner
+
+```
+cargo run --release -p filesweep-core --example scan -- <folder>...
+```
+
+It prints the groups of identical files it finds, what it skipped and why,
+and a summary. It changes nothing on disk.
+
 ## Layout
 
 - `crates/filesweep-core`: the read-only scanner library.
