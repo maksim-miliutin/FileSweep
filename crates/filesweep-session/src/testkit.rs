@@ -14,10 +14,14 @@ use crate::view::Status;
 /// How long a test waits for something that has to happen.
 pub(crate) const PATIENCE: Duration = Duration::from_secs(10);
 
+/// How long a test watches for something that must not happen.
+pub(crate) const QUIET: Duration = Duration::from_millis(300);
+
 pub(crate) type EngineResult = Result<ScanSummary, RequestError>;
 
 enum Step {
     Emit(ScanEvent),
+    AskCancelled,
     Finish(EngineResult),
     Panic(Box<dyn Any + Send>),
 }
@@ -26,6 +30,7 @@ enum Step {
 pub(crate) struct Director {
     steps: Sender<Step>,
     taken: Receiver<()>,
+    answers: Receiver<bool>,
 }
 
 impl Director {
@@ -35,6 +40,15 @@ impl Director {
         self.taken
             .recv_timeout(PATIENCE)
             .expect("the engine hands the event over");
+    }
+
+    /// Whether a cancel has reached the engine: asked of the control the
+    /// engine itself was given.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.tell(Step::AskCancelled);
+        self.answers
+            .recv_timeout(PATIENCE)
+            .expect("the engine answers")
     }
 
     pub(crate) fn finish(&self, result: EngineResult) {
@@ -55,10 +69,14 @@ impl Director {
 pub(crate) fn script() -> (impl Engine, Director) {
     let (steps, inbox) = channel();
     let (hand_over, taken) = channel();
+    let (answer, answers) = channel();
 
-    let engine = move |_: &ScanRequest, _: &ScanControl, sink: &mut dyn FnMut(ScanEvent)| {
+    let engine = move |_: &ScanRequest, control: &ScanControl, sink: &mut dyn FnMut(ScanEvent)| {
         loop {
             match inbox.recv() {
+                Ok(Step::AskCancelled) => {
+                    let _ = answer.send(control.is_cancelled());
+                }
                 Ok(Step::Emit(event)) => {
                     sink(event);
                     // A director that stopped listening has already failed
@@ -74,7 +92,51 @@ pub(crate) fn script() -> (impl Engine, Director) {
         }
     };
 
-    (engine, Director { steps, taken })
+    let director = Director {
+        steps,
+        taken,
+        answers,
+    };
+
+    (engine, director)
+}
+
+/// Lets a held engine go.
+pub(crate) struct Gate {
+    opening: Sender<()>,
+}
+
+impl Gate {
+    pub(crate) fn open(self) {
+        self.opening.send(()).expect("the engine waits at the gate");
+    }
+}
+
+/// Holds `engine` back until its gate is opened, so a test can act on a scan
+/// that is known not to have begun. A gate dropped unopened ends the scan as
+/// cancelled without ever running the engine.
+pub(crate) fn gated(engine: impl Engine) -> (impl Engine, Gate) {
+    let (opening, opened) = channel();
+
+    let held = move |request: &ScanRequest,
+                     control: &ScanControl,
+                     sink: &mut dyn FnMut(ScanEvent)| match opened.recv() {
+        Ok(()) => engine(request, control, sink),
+        Err(_) => Ok(summary(Outcome::Cancelled)),
+    };
+
+    (held, Gate { opening })
+}
+
+/// A temporary folder with one pair of identical files, for the real scanner.
+pub(crate) fn duplicates() -> tempfile::TempDir {
+    let tree = tempfile::tempdir().expect("a temporary folder");
+    for name in ["one.bin", "two.bin"] {
+        std::fs::write(tree.path().join(name), b"the same bytes twice")
+            .expect("a file in the temporary folder");
+    }
+
+    tree
 }
 
 /// Polls the status until it is what the test waits for. A session that

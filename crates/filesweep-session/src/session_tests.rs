@@ -9,7 +9,9 @@ use filesweep_core::{SkipReason, SkipReason::AccessDenied};
 
 use crate::error::StartError;
 use crate::session::{MAX_ROOTS, Session};
-use crate::testkit::{Director, group, root, script, skip, summary, wait_for};
+use crate::testkit::{
+    Director, QUIET, duplicates, gated, group, root, script, skip, summary, wait_for,
+};
 use crate::view::{Phase, SkipCode, State, Status, SummaryView};
 
 /// Starts a scripted scan of one root and hands back its director.
@@ -23,7 +25,26 @@ fn started(session: &Session) -> Director {
 }
 
 fn ended(session: &Session) -> Status {
-    wait_for(session, |status| status.state != State::Scanning)
+    wait_for(session, |status| {
+        matches!(
+            status.state,
+            State::Completed | State::Cancelled | State::Failed
+        )
+    })
+}
+
+/// Starts the real scanner on `tree`, held at a gate until the test opens it.
+fn started_at_a_gate(session: &Session, tree: &tempfile::TempDir) -> crate::testkit::Gate {
+    let (engine, gate) = gated(filesweep_core::scan);
+    session
+        .start_with(
+            vec![tree.path().to_path_buf()],
+            ScanPolicy::default(),
+            engine,
+        )
+        .expect("the scan starts");
+
+    gate
 }
 
 #[test]
@@ -270,4 +291,168 @@ fn session_can_be_shared_between_threads() {
     fn shared<T: Send + Sync + 'static>() {}
 
     shared::<Session>();
+}
+
+#[test]
+fn pause_is_reported_at_once_and_resume_returns_to_scanning() {
+    let session = Session::new();
+    let _director = started(&session);
+
+    assert_eq!(session.pause().state, State::Paused);
+    assert_eq!(session.status().state, State::Paused);
+
+    assert_eq!(session.resume().state, State::Scanning);
+    assert_eq!(session.status().state, State::Scanning);
+}
+
+#[test]
+fn a_paused_scan_does_no_work_until_resumed() {
+    let tree = duplicates();
+    let session = Session::new();
+    let gate = started_at_a_gate(&session, &tree);
+
+    session.pause();
+    gate.open();
+
+    // Held before its first step, the scanner has nothing to report.
+    std::thread::sleep(QUIET);
+    let held = session.status();
+    assert_eq!(held.state, State::Paused);
+    let scan = held.scan.expect("a paused scan is shown");
+    assert_eq!((scan.files_seen, scan.groups), (0, 0));
+
+    session.resume();
+
+    let status = ended(&session);
+    assert_eq!(status.state, State::Completed);
+    assert_eq!(status.scan.map(|scan| scan.groups), Some(1));
+}
+
+#[test]
+fn cancel_reports_stopping_until_the_engine_returns() {
+    let session = Session::new();
+    let director = started(&session);
+    director.emit(ScanEvent::Group(group(10, 7)));
+    assert!(!director.is_cancelled());
+
+    assert_eq!(session.cancel().state, State::Stopping);
+
+    assert!(director.is_cancelled());
+    assert_eq!(session.status().state, State::Stopping);
+
+    director.finish(Ok(summary(Outcome::Cancelled)));
+    let status = ended(&session);
+    assert_eq!(status.state, State::Cancelled);
+    assert_eq!(status.scan.map(|scan| scan.groups), Some(1));
+}
+
+#[test]
+fn a_cancelled_scan_stops_a_real_engine() {
+    let tree = duplicates();
+    let session = Session::new();
+    let gate = started_at_a_gate(&session, &tree);
+
+    session.cancel();
+    gate.open();
+
+    let status = ended(&session);
+    assert_eq!(status.state, State::Cancelled);
+    let scan = status.scan.expect("a cancelled scan is still shown");
+    assert_eq!((scan.files_seen, scan.groups), (0, 0));
+}
+
+#[test]
+fn a_scan_that_finishes_despite_a_cancel_is_completed() {
+    let session = Session::new();
+    let director = started(&session);
+    session.cancel();
+
+    // The cancel came too late for the engine to notice.
+    director.finish(Ok(summary(Outcome::Completed)));
+
+    assert_eq!(ended(&session).state, State::Completed);
+}
+
+#[test]
+fn a_scan_that_ends_while_paused_is_not_left_paused() {
+    let session = Session::new();
+    let director = started(&session);
+    session.pause();
+
+    // The pause came too late for the engine to notice. A scan left paused
+    // here would never end: nothing is running that a resume could wake.
+    director.finish(Ok(summary(Outcome::Completed)));
+
+    let status = ended(&session);
+    assert_eq!(status.state, State::Completed);
+    assert_eq!(session.resume(), status);
+}
+
+#[test]
+fn cancel_stops_a_paused_scan() {
+    let tree = duplicates();
+    let session = Session::new();
+    let gate = started_at_a_gate(&session, &tree);
+    session.pause();
+    gate.open();
+
+    assert_eq!(session.cancel().state, State::Stopping);
+
+    let status = ended(&session);
+    assert_eq!(status.state, State::Cancelled);
+    assert_eq!(status.scan.map(|scan| scan.groups), Some(0));
+}
+
+#[test]
+fn a_stopping_scan_takes_no_more_orders() {
+    let session = Session::new();
+    let director = started(&session);
+    session.cancel();
+
+    assert_eq!(session.resume().state, State::Stopping);
+    assert_eq!(session.pause().state, State::Stopping);
+    assert!(director.is_cancelled());
+}
+
+#[test]
+fn start_is_refused_while_a_scan_is_paused_or_stopping() {
+    let session = Session::new();
+    let _director = started(&session);
+    let start_again = || {
+        let (engine, _unused) = script();
+        session.start_with(vec![root()], ScanPolicy::default(), engine)
+    };
+
+    session.pause();
+    assert_eq!(start_again(), Err(StartError::Busy));
+
+    session.cancel();
+    assert_eq!(start_again(), Err(StartError::Busy));
+}
+
+#[test]
+fn controls_do_nothing_without_a_running_scan() {
+    let session = Session::new();
+    assert_eq!(session.pause(), Status::idle());
+    assert_eq!(session.resume(), Status::idle());
+    assert_eq!(session.cancel(), Status::idle());
+
+    let director = started(&session);
+    director.finish(Ok(summary(Outcome::Completed)));
+    let finished = ended(&session);
+
+    assert_eq!(session.pause(), finished);
+    assert_eq!(session.resume(), finished);
+    assert_eq!(session.cancel(), finished);
+}
+
+#[test]
+fn dropping_the_session_cancels_the_scan() {
+    let session = Session::new();
+    let director = started(&session);
+    assert!(!director.is_cancelled());
+
+    drop(session);
+
+    assert!(director.is_cancelled());
 }

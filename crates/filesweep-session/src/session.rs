@@ -57,6 +57,7 @@ struct Inner {
 struct Scan {
     id: u64,
     roots: Vec<PathBuf>,
+    control: ScanControl,
     stage: Stage,
     files_seen: u64,
     /// `None` until the scanner starts reading files.
@@ -66,6 +67,8 @@ struct Scan {
 
 enum Stage {
     Scanning,
+    Paused,
+    Stopping,
     Completed(ScanSummary),
     Cancelled(ScanSummary),
     Failed(String),
@@ -113,23 +116,77 @@ impl Session {
         let control = ScanControl::new();
         let shared = Arc::clone(&self.shared);
 
+        let worker_control = control.clone();
+
         // The lock is held across the spawn on purpose: the new thread's
         // first event waits until the scan below is in place to receive it.
         thread::Builder::new()
             .name("filesweep-scan".to_owned())
-            .spawn(move || run(&shared, &request, &control, engine))
+            .spawn(move || run(&shared, &request, &worker_control, engine))
             .map_err(|err| StartError::Spawn {
                 message: err.to_string(),
             })?;
 
         inner.last_id += 1;
-        inner.scan = Some(Scan::new(inner.last_id, roots));
+        inner.scan = Some(Scan::new(inner.last_id, roots, control));
 
         Ok(inner.status())
     }
 
+    /// Holds the running scan until `resume` or `cancel`. The status says
+    /// paused at once; the scanner stops within one block of reading.
+    pub fn pause(&self) -> Status {
+        self.order(|scan| {
+            if matches!(scan.stage, Stage::Scanning) {
+                scan.control.pause();
+                scan.stage = Stage::Paused;
+            }
+        })
+    }
+
+    pub fn resume(&self) -> Status {
+        self.order(|scan| {
+            if matches!(scan.stage, Stage::Paused) {
+                scan.control.resume();
+                scan.stage = Stage::Scanning;
+            }
+        })
+    }
+
+    /// Stops the running scan for good, paused or not. The status says
+    /// stopping until the scanner has returned, and then how it ended: as a
+    /// rule cancelled, but completed if it was already past its last step.
+    pub fn cancel(&self) -> Status {
+        self.order(|scan| {
+            if matches!(scan.stage, Stage::Scanning | Stage::Paused) {
+                scan.control.cancel();
+                scan.stage = Stage::Stopping;
+            }
+        })
+    }
+
+    /// An order that does not fit the state of the scan is not an error: two
+    /// interfaces, or two clicks, may race.
+    fn order(&self, order: impl FnOnce(&mut Scan)) -> Status {
+        let mut inner = lock(&self.shared);
+        if let Some(scan) = inner.scan.as_mut() {
+            order(scan);
+        }
+
+        inner.status()
+    }
+
     pub fn status(&self) -> Status {
         lock(&self.shared).status()
+    }
+}
+
+impl Drop for Session {
+    /// A scan nobody can ask about any more is stopped. The thread is not
+    /// waited for: it ends on its own within one block, and waiting here
+    /// could hold up a closing application on a disk that does not answer.
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 
@@ -143,10 +200,11 @@ impl Inner {
 }
 
 impl Scan {
-    fn new(id: u64, roots: Vec<PathBuf>) -> Self {
+    fn new(id: u64, roots: Vec<PathBuf>, control: ScanControl) -> Self {
         Self {
             id,
             roots,
+            control,
             stage: Stage::Scanning,
             files_seen: 0,
             hashing: None,
@@ -154,8 +212,12 @@ impl Scan {
         }
     }
 
+    /// The scan thread has not returned yet.
     fn is_running(&self) -> bool {
-        matches!(self.stage, Stage::Scanning)
+        matches!(
+            self.stage,
+            Stage::Scanning | Stage::Paused | Stage::Stopping
+        )
     }
 
     fn take(&mut self, event: ScanEvent) {
@@ -182,6 +244,8 @@ impl Scan {
     fn status(&self) -> Status {
         let (state, summary, error) = match &self.stage {
             Stage::Scanning => (State::Scanning, None, None),
+            Stage::Paused => (State::Paused, None, None),
+            Stage::Stopping => (State::Stopping, None, None),
             Stage::Completed(summary) => (State::Completed, Some(summary), None),
             Stage::Cancelled(summary) => (State::Cancelled, Some(summary), None),
             Stage::Failed(error) => (State::Failed, None, Some(error)),
