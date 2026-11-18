@@ -294,7 +294,7 @@ pub struct PageQuery {
 
 /// A path as text for the eye. Lossy for a name that is not Unicode, which is
 /// why nothing is ever done to a file by this text.
-fn shown(path: &Path) -> String {
+pub(crate) fn shown(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
