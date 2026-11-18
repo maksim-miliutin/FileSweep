@@ -246,7 +246,6 @@ fn summary_counts_add_up() {
             .sum::<u64>()
     );
     // One copy of each group stays: two of the big ones and one of the mid ones can go.
-    #[cfg(unix)]
     assert_eq!(summary.reclaimable_bytes, 2 * 1000 + 200);
 }
 

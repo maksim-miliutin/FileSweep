@@ -1,7 +1,4 @@
 //! One file under several names is one file, not a set of copies.
-//!
-//! Unix only for now: file identity has no Windows source yet.
-#![cfg(unix)]
 
 mod common;
 

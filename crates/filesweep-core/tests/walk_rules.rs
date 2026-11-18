@@ -1,8 +1,8 @@
 //! What the walk leaves out below a root, and why.
 //!
-//! Unix only for now: the fixtures are symlinks, dot-files and a FIFO, and the
-//! folder identity these tests lean on has no Windows source yet.
-#![cfg(unix)]
+//! The tests that need a symlink, a dot-file or a FIFO are Unix only. Their
+//! Windows counterparts, with junctions and file attributes, are in
+//! `windows_only.rs`.
 
 mod common;
 
@@ -18,6 +18,7 @@ fn skip(path: impl AsRef<Path>, reason: SkipReason) -> Skip {
     }
 }
 
+#[cfg(unix)]
 fn everything() -> ScanPolicy {
     ScanPolicy {
         include_hidden: true,
@@ -25,6 +26,7 @@ fn everything() -> ScanPolicy {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn symlink_to_directory_is_not_entered() {
     let tree = Tree::new();
@@ -38,6 +40,7 @@ fn symlink_to_directory_is_not_entered() {
     assert_eq!(seen.summary.files_seen, 2);
 }
 
+#[cfg(unix)]
 #[test]
 fn symlink_to_file_is_skipped_not_indexed() {
     let tree = Tree::new();
@@ -50,6 +53,7 @@ fn symlink_to_file_is_skipped_not_indexed() {
     assert_eq!(seen.summary.files_seen, 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn symlink_loop_terminates() {
     let tree = Tree::new();
@@ -66,6 +70,7 @@ fn symlink_loop_terminates() {
     assert_eq!(seen.summary.files_seen, 1);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_dangling_symlink_is_reported_as_a_link() {
     let tree = Tree::new();
@@ -76,6 +81,7 @@ fn a_dangling_symlink_is_reported_as_a_link() {
     assert_eq!(seen.skipped, [skip(&link, SkipReason::Link)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn explicit_root_that_is_a_symlink_is_walked() {
     let tree = Tree::new();
@@ -147,6 +153,7 @@ fn root_spelled_many_ways_is_one_directory() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_link_root_to_a_folder_already_walked_is_covered() {
     let tree = Tree::new();
@@ -160,6 +167,7 @@ fn a_link_root_to_a_folder_already_walked_is_covered() {
     assert_eq!(seen.skipped, [skip(&link, SkipReason::AlreadyCovered)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn hidden_entries_are_skipped_by_default() {
     let tree = Tree::new();
@@ -179,6 +187,7 @@ fn hidden_entries_are_skipped_by_default() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn include_hidden_indexes_them() {
     let tree = Tree::new();
@@ -192,6 +201,7 @@ fn include_hidden_indexes_them() {
     assert!(seen.skipped.is_empty(), "skipped: {:?}", seen.skipped);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_hidden_root_is_still_walked() {
     let tree = Tree::new();
@@ -204,6 +214,7 @@ fn a_hidden_root_is_still_walked() {
     assert!(seen.skipped.is_empty(), "skipped: {:?}", seen.skipped);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_link_named_like_a_hidden_file_is_reported_as_link() {
     let tree = Tree::new();
@@ -217,6 +228,7 @@ fn a_link_named_like_a_hidden_file_is_reported_as_link() {
     assert_eq!(showing.skipped, [skip(&link, SkipReason::Link)]);
 }
 
+#[cfg(unix)]
 #[test]
 fn fifo_is_skipped_as_special_and_never_opened() {
     let tree = Tree::new();

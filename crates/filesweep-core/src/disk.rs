@@ -91,7 +91,7 @@ impl Disk for StdDisk {
     }
 
     fn dir_identity(&self, dir: &Path) -> Option<FileIdentity> {
-        identity_of(&fs::metadata(dir).ok()?)
+        dir_identity_of(dir)
     }
 
     fn open(&self, path: &Path) -> io::Result<Box<dyn OpenFile>> {
@@ -104,12 +104,13 @@ struct StdFile(File);
 impl OpenFile for StdFile {
     fn stamp(&mut self) -> io::Result<FileStamp> {
         let meta = self.0.metadata()?;
+        let (identity, link_count) = identity_and_links(&self.0, &meta);
 
         Ok(FileStamp {
-            identity: identity_of(&meta),
+            identity,
             size: meta.len(),
             modified: meta.modified().ok(),
-            link_count: link_count_of(&meta),
+            link_count,
         })
     }
 
@@ -150,33 +151,58 @@ fn flags_of(_meta: &Metadata, name: &OsStr) -> EntryFlags {
     }
 }
 
-#[cfg(not(unix))]
-fn flags_of(_meta: &Metadata, _name: &OsStr) -> EntryFlags {
-    EntryFlags::default()
+#[cfg(windows)]
+fn flags_of(meta: &Metadata, _name: &OsStr) -> EntryFlags {
+    use std::os::windows::fs::MetadataExt;
+
+    crate::platform::flags_from_windows_attributes(meta.file_attributes())
 }
 
 #[cfg(unix)]
-fn identity_of(meta: &Metadata) -> Option<FileIdentity> {
+fn identity_and_links(_file: &File, meta: &Metadata) -> (Option<FileIdentity>, Option<u64>) {
     use std::os::unix::fs::MetadataExt;
+
+    (
+        crate::platform::identity_from_raw(meta.dev(), u128::from(meta.ino())),
+        Some(meta.nlink()),
+    )
+}
+
+// std keeps the volume serial number, the file index and the link count
+// behind an unstable feature, so they come from winapi-util. A file system
+// that cannot answer leaves the file without an identity, and the scan then
+// calls its groups unverified instead of failing.
+#[cfg(windows)]
+fn identity_and_links(file: &File, _meta: &Metadata) -> (Option<FileIdentity>, Option<u64>) {
+    match winapi_util::file::information(file) {
+        Ok(info) => (
+            crate::platform::identity_from_raw(
+                info.volume_serial_number(),
+                u128::from(info.file_index()),
+            ),
+            Some(info.number_of_links()),
+        ),
+        Err(_) => (None, None),
+    }
+}
+
+#[cfg(unix)]
+fn dir_identity_of(dir: &Path) -> Option<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    let meta = fs::metadata(dir).ok()?;
 
     crate::platform::identity_from_raw(meta.dev(), u128::from(meta.ino()))
 }
 
-#[cfg(not(unix))]
-fn identity_of(_meta: &Metadata) -> Option<FileIdentity> {
-    None
-}
+// Costs one extra open per folder: a directory handle is the only way to its
+// identity. The open follows links, so the answer is for what `dir` leads to.
+#[cfg(windows)]
+fn dir_identity_of(dir: &Path) -> Option<FileIdentity> {
+    let handle = winapi_util::Handle::from_path_any(dir).ok()?;
+    let info = winapi_util::file::information(&handle).ok()?;
 
-#[cfg(unix)]
-fn link_count_of(meta: &Metadata) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
-
-    Some(meta.nlink())
-}
-
-#[cfg(not(unix))]
-fn link_count_of(_meta: &Metadata) -> Option<u64> {
-    None
+    crate::platform::identity_from_raw(info.volume_serial_number(), u128::from(info.file_index()))
 }
 
 #[cfg(test)]
@@ -255,7 +281,6 @@ mod tests {
         assert!(!info_of(&listed, "plain").flags.hidden);
     }
 
-    #[cfg(unix)]
     #[test]
     fn hard_links_share_identity_and_report_link_count() {
         let dir = tempfile::tempdir().unwrap();
@@ -293,6 +318,21 @@ mod tests {
 
         assert!(identity.is_some());
         assert_eq!(StdDisk.dir_identity(&alias), identity);
+        assert_ne!(StdDisk.dir_identity(&other), identity);
+        assert_eq!(StdDisk.dir_identity(&dir.path().join("missing")), None);
+    }
+
+    #[test]
+    fn dir_identity_tells_folders_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let (one, other) = (dir.path().join("one"), dir.path().join("other"));
+        fs::create_dir(&one).unwrap();
+        fs::create_dir(&other).unwrap();
+
+        let identity = StdDisk.dir_identity(&one);
+
+        assert!(identity.is_some());
+        assert_eq!(StdDisk.dir_identity(&one), identity);
         assert_ne!(StdDisk.dir_identity(&other), identity);
         assert_eq!(StdDisk.dir_identity(&dir.path().join("missing")), None);
     }
