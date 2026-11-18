@@ -4,3 +4,26 @@
 //! `clippy.toml` in this crate rejects the std calls that would do so.
 
 #![forbid(unsafe_code)]
+
+mod control;
+#[cfg(test)]
+mod control_tests;
+mod disk;
+mod events;
+#[cfg(test)]
+mod failures;
+mod hashing;
+mod platform;
+mod scan;
+#[cfg(test)]
+mod testkit;
+mod types;
+mod walk;
+
+pub use control::ScanControl;
+pub use scan::scan;
+pub use types::{
+    ContentHash, DuplicateFile, DuplicateGroup, FileIdentity, FileStamp, Independence, IoFailure,
+    Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
+    SkipReason,
+};
