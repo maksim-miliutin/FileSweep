@@ -1,0 +1,60 @@
+{
+  "total": 7,
+  "offset": 5,
+  "groups": [
+    {
+      "id": 5,
+      "size": 1048576,
+      "hash": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "independence": "verified",
+      "reclaimableBytes": 1048576,
+      "files": [
+        {
+          "id": 0,
+          "path": "/t/a/one.bin",
+          "name": "one.bin",
+          "folder": "/t/a",
+          "modifiedMs": 1731400000123,
+          "otherPaths": [],
+          "linkedElsewhere": false
+        },
+        {
+          "id": 1,
+          "path": "/t/b/copy.bin",
+          "name": "copy.bin",
+          "folder": "/t/b",
+          "modifiedMs": 1731400060000,
+          "otherPaths": ["/t/b/link.bin"],
+          "linkedElsewhere": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "size": 12,
+      "hash": "abababababababababababababababababababababababababababababababab",
+      "independence": "unverified",
+      "reclaimableBytes": 0,
+      "files": [
+        {
+          "id": 0,
+          "path": "/t/c/notes.txt",
+          "name": "notes.txt",
+          "folder": "/t/c",
+          "modifiedMs": null,
+          "otherPaths": [],
+          "linkedElsewhere": false
+        },
+        {
+          "id": 1,
+          "path": "/t/d/notes (1).txt",
+          "name": "notes (1).txt",
+          "folder": "/t/d",
+          "modifiedMs": null,
+          "otherPaths": [],
+          "linkedElsewhere": false
+        }
+      ]
+    }
+  ]
+}

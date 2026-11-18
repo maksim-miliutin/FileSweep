@@ -42,6 +42,10 @@ and a summary. It changes nothing on disk.
 ## Layout
 
 - `crates/filesweep-core`: the read-only scanner library.
+- `crates/filesweep-session`: runs a scan in the background and serves its
+  progress and results to an interface, as a status snapshot and pages.
+- `contract/`: examples of the messages an interface exchanges with the
+  session. Both sides are tested against them.
 
 ## License
 

@@ -1,0 +1,19 @@
+{
+  "state": "failed",
+  "scan": {
+    "id": 3,
+    "roots": ["/home/me/Downloads"],
+    "phase": "walking",
+    "filesSeen": 17,
+    "filesDone": 0,
+    "filesTotal": 0,
+    "bytesDone": 0,
+    "bytesTotal": 0,
+    "groups": 0,
+    "reclaimableBytes": 0,
+    "skipped": 0,
+    "skippedByReason": {},
+    "summary": null,
+    "error": "the scanner stopped unexpectedly: boom"
+  }
+}

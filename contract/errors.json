@@ -1,0 +1,9 @@
+{
+  "busy": { "code": "busy" },
+  "noRoots": { "code": "noRoots" },
+  "tooManyRoots": { "code": "tooManyRoots", "max": 64 },
+  "relativeRoot": { "code": "relativeRoot", "path": "Downloads" },
+  "spawn": { "code": "spawn", "message": "out of threads" },
+  "staleScan": { "code": "staleScan" },
+  "noSuchFile": { "code": "noSuchFile" }
+}
