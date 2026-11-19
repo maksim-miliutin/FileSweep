@@ -1,0 +1,19 @@
+{
+  "state": "scanning",
+  "scan": {
+    "id": 1,
+    "roots": ["/home/me/Downloads", "/home/me/Pictures"],
+    "phase": "hashing",
+    "filesSeen": 1200,
+    "filesDone": 40,
+    "filesTotal": 300,
+    "bytesDone": 1048576,
+    "bytesTotal": 734003200,
+    "groups": 3,
+    "reclaimableBytes": 2097152,
+    "skipped": 2,
+    "skippedByReason": { "accessDenied": 1, "hidden": 1 },
+    "summary": null,
+    "error": null
+  }
+}

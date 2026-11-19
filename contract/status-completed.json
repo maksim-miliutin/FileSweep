@@ -1,0 +1,28 @@
+{
+  "state": "completed",
+  "scan": {
+    "id": 2,
+    "roots": ["/home/me/Downloads"],
+    "phase": "hashing",
+    "filesSeen": 1200,
+    "filesDone": 300,
+    "filesTotal": 300,
+    "bytesDone": 734003200,
+    "bytesTotal": 734003200,
+    "groups": 3,
+    "reclaimableBytes": 2097152,
+    "skipped": 2,
+    "skippedByReason": { "accessDenied": 1, "hidden": 1 },
+    "summary": {
+      "filesSeen": 1200,
+      "emptyFiles": 4,
+      "candidates": 300,
+      "filesHashed": 297,
+      "bytesHashed": 733000000,
+      "groups": 3,
+      "reclaimableBytes": 2097152,
+      "skipped": 2
+    },
+    "error": null
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "total": 12,
+  "offset": 0,
+  "items": [
+    { "path": "/t/link", "reason": "link", "detail": null },
+    { "path": "/t/cloud.docx", "reason": "onlineOnly", "detail": null },
+    { "path": "/t/sys", "reason": "system", "detail": null },
+    { "path": "/t/.hidden", "reason": "hidden", "detail": null },
+    { "path": "/t/pipe", "reason": "special", "detail": null },
+    { "path": "/t/file-as-root", "reason": "notADirectory", "detail": null },
+    { "path": "/t/again", "reason": "alreadyCovered", "detail": null },
+    { "path": "/t/locked", "reason": "accessDenied", "detail": null },
+    { "path": "/t/busy.db", "reason": "inUse", "detail": null },
+    { "path": "/t/gone", "reason": "vanished", "detail": null },
+    { "path": "/t/growing.log", "reason": "changed", "detail": null },
+    { "path": "/t/broken", "reason": "io", "detail": "the device is not ready (os error 21)" }
+  ]
+}
