@@ -1,0 +1,18 @@
+{
+  "start": {
+    "command": "scan_start",
+    "payload": { "roots": ["/nonexistent/filesweep-example"], "includeHidden": false }
+  },
+  "pause": { "command": "scan_pause", "payload": {} },
+  "resume": { "command": "scan_resume", "payload": {} },
+  "cancel": { "command": "scan_cancel", "payload": {} },
+  "status": { "command": "scan_status", "payload": {} },
+  "groups": {
+    "command": "scan_groups",
+    "payload": { "scanId": 1, "query": { "offset": 0, "limit": 50, "sort": "savings" } }
+  },
+  "skipped": {
+    "command": "scan_skipped",
+    "payload": { "scanId": 1, "query": { "offset": 0, "limit": 200 } }
+  }
+}

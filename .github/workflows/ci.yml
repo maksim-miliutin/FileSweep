@@ -44,3 +44,23 @@ jobs:
 
       - name: build
         run: cargo build --locked --release
+
+  # The desktop shell is not among the default members: it needs a WebView to
+  # build, which Windows runners have and a plain Linux runner does not.
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: toolchain
+        run: rustup toolchain install
+
+      # The tests call every command through Tauri's IPC on its mock runtime.
+      # No window is opened and the interface does not have to be built.
+      - name: clippy
+        run: cargo clippy -p filesweep-desktop --locked --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test -p filesweep-desktop --locked

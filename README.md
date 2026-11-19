@@ -30,6 +30,15 @@ cargo test
 cargo build --release
 ```
 
+These build and test the libraries. The desktop shell is checked on its own,
+because it needs a WebView to build: Windows has one, and on Linux it takes
+the WebKitGTK development packages from the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+```
+cargo test -p filesweep-desktop
+```
+
 ## Trying the scanner
 
 ```
@@ -44,8 +53,10 @@ and a summary. It changes nothing on disk.
 - `crates/filesweep-core`: the read-only scanner library.
 - `crates/filesweep-session`: runs a scan in the background and serves its
   progress and results to an interface, as a status snapshot and pages.
-- `contract/`: examples of the messages an interface exchanges with the
-  session. Both sides are tested against them.
+- `apps/desktop/src-tauri`: the desktop shell, a Tauri window whose commands
+  carry the interface's calls to the session.
+- `contract/`: examples of the messages and calls the interface exchanges
+  with the session. Both sides are tested against them.
 
 ## License
 

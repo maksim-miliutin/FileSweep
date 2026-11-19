@@ -1,0 +1,21 @@
+[package]
+name = "filesweep-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "The FileSweep desktop application"
+publish = false
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+filesweep-core = { path = "../../../crates/filesweep-core" }
+filesweep-session = { path = "../../../crates/filesweep-session" }
+tauri = "2"
+tauri-plugin-dialog = "2"
+
+[dev-dependencies]
+filesweep-session = { path = "../../../crates/filesweep-session", features = ["testkit"] }
+serde_json = "1"
+tauri = { version = "2", features = ["test"] }
+tempfile = "3"
