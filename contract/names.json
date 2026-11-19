@@ -1,0 +1,4 @@
+{
+  "states": ["idle", "scanning", "paused", "stopping", "cancelled", "completed", "failed"],
+  "phases": ["walking", "hashing"]
+}

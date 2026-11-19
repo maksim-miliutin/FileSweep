@@ -144,6 +144,26 @@ fn idle_status_matches_the_contract() {
     assert_eq!(wire(&Status::idle()), contract("status-idle.json"));
 }
 
+// The status examples show only some of the states. This holds the rest to
+// the names the interface knows them by.
+#[test]
+fn every_state_and_phase_has_the_name_the_contract_lists() {
+    let names = contract("names.json");
+    let states = [
+        State::Idle,
+        State::Scanning,
+        State::Paused,
+        State::Stopping,
+        State::Cancelled,
+        State::Completed,
+        State::Failed,
+    ];
+    let phases = [Phase::Walking, Phase::Hashing];
+
+    assert_eq!(wire(&states), names["states"]);
+    assert_eq!(wire(&phases), names["phases"]);
+}
+
 #[test]
 fn scanning_status_matches_the_contract() {
     let status = Status {
