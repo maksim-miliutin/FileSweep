@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
@@ -8,9 +8,11 @@ use filesweep_core::{
     Outcome, Progress, RequestError, ScanControl, ScanEvent, ScanPolicy, ScanRequest, ScanSummary,
 };
 
-use crate::error::StartError;
+use crate::error::{QueryError, StartError};
 use crate::results::Results;
-use crate::view::{Phase, ScanView, State, Status, SummaryView, shown};
+use crate::view::{
+    GroupPage, GroupQuery, PageQuery, Phase, ScanView, SkipPage, State, Status, SummaryView, shown,
+};
 
 pub const MAX_ROOTS: usize = 64;
 
@@ -179,6 +181,35 @@ impl Session {
     pub fn status(&self) -> Status {
         lock(&self.shared).status()
     }
+
+    /// One page of the groups of `scan`, which has to be the scan the
+    /// session holds now. While it runs, more groups may arrive between two
+    /// calls; `total` says how many there are at this moment.
+    pub fn groups(&self, scan: u64, query: &GroupQuery) -> Result<GroupPage, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        Ok(inner.scan_named(scan)?.results.group_page(query))
+    }
+
+    pub fn skipped(&self, scan: u64, query: &PageQuery) -> Result<SkipPage, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        Ok(inner.scan_named(scan)?.results.skip_page(query))
+    }
+
+    /// The path of a file exactly as the scanner saw it, by the ids its view
+    /// carries. This, and never the text shown for a path, is what an action
+    /// on a file starts from.
+    pub fn file_path(&self, scan: u64, group: u64, file: u64) -> Result<PathBuf, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        inner
+            .scan_named(scan)?
+            .results
+            .file_path(group, file)
+            .map(Path::to_path_buf)
+            .ok_or(QueryError::NoSuchFile)
+    }
 }
 
 impl Drop for Session {
@@ -196,6 +227,14 @@ impl Inner {
             Some(scan) => scan.status(),
             None => Status::idle(),
         }
+    }
+
+    /// Rows of one scan must never answer a question about another.
+    fn scan_named(&mut self, id: u64) -> Result<&mut Scan, QueryError> {
+        self.scan
+            .as_mut()
+            .filter(|scan| scan.id == id)
+            .ok_or(QueryError::StaleScan)
     }
 }
 

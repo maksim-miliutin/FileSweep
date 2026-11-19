@@ -7,12 +7,15 @@ use std::path::PathBuf;
 use filesweep_core::{Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanSummary};
 use filesweep_core::{SkipReason, SkipReason::AccessDenied};
 
-use crate::error::StartError;
+use crate::error::{QueryError, StartError};
 use crate::session::{MAX_ROOTS, Session};
 use crate::testkit::{
     Director, QUIET, duplicates, gated, group, root, script, skip, summary, wait_for,
 };
-use crate::view::{Phase, SkipCode, State, Status, SummaryView};
+use crate::view::{
+    GroupPage, GroupQuery, GroupSort, MAX_PAGE, PageQuery, Phase, SkipCode, State, Status,
+    SummaryView,
+};
 
 /// Starts a scripted scan of one root and hands back its director.
 fn started(session: &Session) -> Director {
@@ -455,4 +458,287 @@ fn dropping_the_session_cancels_the_scan() {
     drop(session);
 
     assert!(director.is_cancelled());
+}
+
+/// A scripted scan that has reported one group for each `(size, reclaimable)`.
+/// Hands back its director and the id to query it by.
+fn with_groups(session: &Session, groups: &[(u64, u64)]) -> (Director, u64) {
+    let director = started(session);
+    for &(size, reclaimable_bytes) in groups {
+        director.emit(ScanEvent::Group(group(size, reclaimable_bytes)));
+    }
+    let scan = session.status().scan.expect("the scan is shown").id;
+
+    (director, scan)
+}
+
+fn page(offset: u64, limit: u32, sort: GroupSort) -> GroupQuery {
+    GroupQuery {
+        offset,
+        limit,
+        sort,
+    }
+}
+
+fn ids(page: &GroupPage) -> Vec<u64> {
+    page.groups.iter().map(|group| group.id).collect()
+}
+
+#[test]
+fn groups_come_in_pages_with_the_total() {
+    let session = Session::new();
+    let sizes = [(50, 50), (40, 40), (30, 30), (20, 20), (10, 10)];
+    let (_director, scan) = with_groups(&session, &sizes);
+
+    let second_and_third = session
+        .groups(scan, &page(1, 2, GroupSort::Found))
+        .expect("the scan is the current one");
+
+    assert_eq!((second_and_third.total, second_and_third.offset), (5, 1));
+    assert_eq!(ids(&second_and_third), [1, 2]);
+    let first_row = &second_and_third.groups[0];
+    assert_eq!((first_row.size, first_row.reclaimable_bytes), (40, 40));
+    assert_eq!(first_row.files.len(), 2);
+    assert_eq!(first_row.files[1].name, "40-b");
+}
+
+#[test]
+fn a_page_past_the_end_is_empty() {
+    let session = Session::new();
+    let (_director, scan) = with_groups(&session, &[(30, 30), (20, 20), (10, 10)]);
+
+    for sort in [GroupSort::Found, GroupSort::Savings] {
+        let ask = |offset: u64, limit: u32| {
+            session
+                .groups(scan, &page(offset, limit, sort))
+                .expect("the scan is the current one")
+        };
+
+        for offset in [3, 4, u64::MAX] {
+            let past = ask(offset, 10);
+            assert_eq!((past.total, past.groups.len()), (3, 0), "offset {offset}");
+        }
+        // A page that only reaches past the end is cut at the end.
+        assert_eq!(ids(&ask(2, 10)), [2]);
+        // Nothing is a fair thing to ask for: the total alone is an answer.
+        assert_eq!((ask(0, 0).total, ask(0, 0).groups.len()), (3, 0));
+    }
+}
+
+#[test]
+fn a_page_is_never_longer_than_the_cap() {
+    let session = Session::new();
+    let director = started(&session);
+    let rows = u64::from(MAX_PAGE) + 100;
+    for size in (1..=rows).rev() {
+        director.emit(ScanEvent::Group(group(size, size)));
+        director.emit(ScanEvent::Skipped(skip(&size.to_string(), AccessDenied)));
+    }
+    let scan = session.status().scan.expect("the scan is shown").id;
+
+    for sort in [GroupSort::Found, GroupSort::Savings] {
+        let groups = session
+            .groups(scan, &page(0, u32::MAX, sort))
+            .expect("the scan is the current one");
+        assert_eq!(groups.total, rows);
+        assert_eq!(groups.groups.len(), MAX_PAGE as usize);
+    }
+    let everything = PageQuery {
+        offset: 0,
+        limit: u32::MAX,
+    };
+    let skipped = session
+        .skipped(scan, &everything)
+        .expect("the scan is the current one");
+    assert_eq!(skipped.total, rows);
+    assert_eq!(skipped.items.len(), MAX_PAGE as usize);
+}
+
+#[test]
+fn savings_order_puts_the_most_reclaimable_first() {
+    let session = Session::new();
+    // Sizes fall as the scanner reports them; savings do not have to.
+    let found = [(90, 30), (80, 0), (70, 70), (60, 30), (50, 70)];
+    let (_director, scan) = with_groups(&session, &found);
+
+    let by_savings = session
+        .groups(scan, &page(0, 10, GroupSort::Savings))
+        .expect("the scan is the current one");
+
+    // Equal savings stay in the order they were found.
+    assert_eq!(ids(&by_savings), [2, 4, 0, 3, 1]);
+    let second_page = session
+        .groups(scan, &page(3, 10, GroupSort::Savings))
+        .expect("the scan is the current one");
+    assert_eq!(ids(&second_page), [3, 1]);
+}
+
+#[test]
+fn found_order_is_the_order_of_arrival() {
+    let session = Session::new();
+    let found = [(90, 30), (80, 0), (70, 70), (60, 30), (50, 70)];
+    let (_director, scan) = with_groups(&session, &found);
+
+    let as_found = session
+        .groups(scan, &page(0, 10, GroupSort::Found))
+        .expect("the scan is the current one");
+
+    assert_eq!(ids(&as_found), [0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn savings_order_follows_groups_that_arrive_later() {
+    let session = Session::new();
+    let (director, scan) = with_groups(&session, &[(10, 10), (5, 5)]);
+    let by_savings = || {
+        session
+            .groups(scan, &page(0, 10, GroupSort::Savings))
+            .expect("the scan is the current one")
+    };
+    assert_eq!(ids(&by_savings()), [0, 1]);
+
+    // Smaller files, but many copies of them.
+    director.emit(ScanEvent::Group(group(4, 40)));
+
+    assert_eq!(ids(&by_savings()), [2, 0, 1]);
+}
+
+#[test]
+fn skipped_entries_come_in_pages() {
+    let session = Session::new();
+    let director = started(&session);
+    for name in ["a", "b", "c", "d", "e"] {
+        director.emit(ScanEvent::Skipped(skip(name, SkipReason::Hidden)));
+    }
+    let scan = session.status().scan.expect("the scan is shown").id;
+    let ask = |offset: u64, limit: u32| {
+        session
+            .skipped(scan, &PageQuery { offset, limit })
+            .expect("the scan is the current one")
+    };
+
+    let second_and_third = ask(1, 2);
+    assert_eq!((second_and_third.total, second_and_third.offset), (5, 1));
+    let paths: Vec<&str> = second_and_third
+        .items
+        .iter()
+        .map(|skip| skip.path.as_str())
+        .collect();
+    let expected = [root().join("b"), root().join("c")];
+    assert_eq!(
+        paths,
+        [expected[0].to_string_lossy(), expected[1].to_string_lossy()]
+    );
+    assert_eq!(second_and_third.items[0].reason, SkipCode::Hidden);
+
+    assert_eq!((ask(5, 10).total, ask(5, 10).items.len()), (5, 0));
+    assert_eq!(ask(u64::MAX, 10).items.len(), 0);
+}
+
+#[test]
+fn a_query_for_another_scan_is_refused() {
+    let session = Session::new();
+    let found = page(0, 10, GroupSort::Found);
+    let all = PageQuery {
+        offset: 0,
+        limit: 10,
+    };
+    // Nothing was ever scanned, so no id names anything.
+    assert_eq!(session.groups(1, &found), Err(QueryError::StaleScan));
+
+    let (first, first_scan) = with_groups(&session, &[(10, 10)]);
+    let other = first_scan + 1;
+    assert_eq!(session.groups(other, &found), Err(QueryError::StaleScan));
+    assert_eq!(session.skipped(other, &all), Err(QueryError::StaleScan));
+    assert_eq!(session.file_path(other, 0, 0), Err(QueryError::StaleScan));
+
+    first.finish(Ok(summary(Outcome::Completed)));
+    ended(&session);
+    let (_second, second_scan) = with_groups(&session, &[]);
+
+    // The first scan was replaced, and its rows went with it.
+    assert_eq!(
+        session.groups(first_scan, &found),
+        Err(QueryError::StaleScan)
+    );
+    assert_eq!(
+        session.skipped(first_scan, &all),
+        Err(QueryError::StaleScan)
+    );
+    assert_eq!(
+        session.file_path(first_scan, 0, 0),
+        Err(QueryError::StaleScan)
+    );
+    assert_eq!(
+        session.groups(second_scan, &found).map(|page| page.total),
+        Ok(0)
+    );
+}
+
+#[test]
+fn file_path_names_the_file_the_ids_point_at() {
+    let session = Session::new();
+    let (_director, scan) = with_groups(&session, &[(10, 10), (5, 5)]);
+
+    assert_eq!(session.file_path(scan, 0, 1), Ok(root().join("10-b")));
+    assert_eq!(session.file_path(scan, 1, 0), Ok(root().join("5-a")));
+}
+
+#[cfg(unix)]
+#[test]
+fn file_path_gives_back_the_exact_path() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    // The guard this is: text shown for a name that is not Unicode cannot be
+    // turned back into the path, so nothing may ever act on that text.
+    let odd = root().join(OsStr::from_bytes(b"caf\xe9.txt"));
+    let mut pair = group(10, 10);
+    pair.files[1].paths = vec![odd.clone()];
+    let session = Session::new();
+    let director = started(&session);
+    director.emit(ScanEvent::Group(pair));
+    let scan = session.status().scan.expect("the scan is shown").id;
+
+    let shown = session
+        .groups(scan, &page(0, 10, GroupSort::Found))
+        .expect("the scan is the current one");
+
+    assert_eq!(shown.groups[0].files[1].name, "caf\u{fffd}.txt");
+    assert_eq!(session.file_path(scan, 0, 1), Ok(odd));
+}
+
+#[test]
+fn file_path_refuses_an_unknown_group_or_file() {
+    let session = Session::new();
+    let (_director, scan) = with_groups(&session, &[(10, 10)]);
+
+    assert_eq!(session.file_path(scan, 1, 0), Err(QueryError::NoSuchFile));
+    assert_eq!(session.file_path(scan, 0, 2), Err(QueryError::NoSuchFile));
+    assert_eq!(
+        session.file_path(scan, u64::MAX, u64::MAX),
+        Err(QueryError::NoSuchFile)
+    );
+}
+
+#[test]
+fn results_stay_available_after_the_scan_ends() {
+    let session = Session::new();
+    let (director, scan) = with_groups(&session, &[(10, 10)]);
+    director.emit(ScanEvent::Skipped(skip("locked", AccessDenied)));
+    director.finish(Ok(summary(Outcome::Completed)));
+    ended(&session);
+
+    let groups = session.groups(scan, &page(0, 10, GroupSort::Savings));
+    let skipped = session.skipped(
+        scan,
+        &PageQuery {
+            offset: 0,
+            limit: 10,
+        },
+    );
+
+    assert_eq!(groups.map(|page| page.total), Ok(1));
+    assert_eq!(skipped.map(|page| page.total), Ok(1));
+    assert_eq!(session.file_path(scan, 0, 0), Ok(root().join("10-a")));
 }

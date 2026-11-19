@@ -3,7 +3,8 @@
 //! A [`Session`] runs one scan at a time on a background thread and keeps
 //! what the scanner reports. An interface is shown a status snapshot, pages of
 //! results, and errors with codes. A path crosses that border as display text
-//! only; an action names a file by ids.
+//! only; an action names a file by ids, and [`Session::file_path`] turns the
+//! ids back into the exact path.
 //!
 //! Nothing here depends on a GUI toolkit, and nothing here touches the disk:
 //! only the scanner reads it.
