@@ -5,6 +5,11 @@ edition = "2024"
 description = "Runs a FileSweep scan in the background and serves its progress and results"
 publish = false
 
+[features]
+# The scripted scanner of this crate's own tests, for the tests of crates
+# built on the session. An application never turns it on.
+testkit = []
+
 [dependencies]
 filesweep-core = { path = "../filesweep-core" }
 serde = { version = "1", features = ["derive"] }
