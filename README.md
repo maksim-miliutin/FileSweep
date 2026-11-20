@@ -39,6 +39,28 @@ the WebKitGTK development packages from the
 cargo test -p filesweep-desktop
 ```
 
+## Running the desktop app
+
+You also need [Node.js](https://nodejs.org) 22 or newer.
+
+```
+cd apps/desktop
+npm install
+npm run tauri dev
+```
+
+The first run compiles the shell, which takes a few minutes. The window is an
+empty frame so far: it shows the name of the application and nothing else.
+
+The checks of the interface code, from the same folder:
+
+```
+npm run lint
+npx tsc --noEmit
+npm test
+npm run build
+```
+
 ## Trying the scanner
 
 ```
@@ -53,6 +75,8 @@ and a summary. It changes nothing on disk.
 - `crates/filesweep-core`: the read-only scanner library.
 - `crates/filesweep-session`: runs a scan in the background and serves its
   progress and results to an interface, as a status snapshot and pages.
+- `apps/desktop`: the interface, written in React and TypeScript and built
+  with Vite.
 - `apps/desktop/src-tauri`: the desktop shell, a Tauri window whose commands
   carry the interface's calls to the session.
 - `contract/`: examples of the messages and calls the interface exchanges
