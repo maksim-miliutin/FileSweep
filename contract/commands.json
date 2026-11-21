@@ -14,5 +14,6 @@
   "skipped": {
     "command": "scan_skipped",
     "payload": { "scanId": 1, "query": { "offset": 0, "limit": 200 } }
-  }
+  },
+  "suggestedRoots": { "command": "suggested_roots", "payload": {} }
 }

@@ -1,4 +1,4 @@
-import type { GroupPage, GroupQuery, PageQuery, SkipPage, Status } from "./types";
+import type { GroupPage, GroupQuery, PageQuery, SkipPage, Status, SuggestedRoot } from "./types";
 
 export interface StartOptions
 {
@@ -22,4 +22,5 @@ export interface Backend
 
 	/** An empty list means the user changed their mind. */
 	pickFolders(): Promise<string[]>;
+	suggestedRoots(): Promise<SuggestedRoot[]>;
 }

@@ -24,6 +24,7 @@ fn shell<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             commands::scan_status,
             commands::scan_groups,
             commands::scan_skipped,
+            commands::suggested_roots,
         ])
 }
 

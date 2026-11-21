@@ -10,7 +10,13 @@ const STEP_MS = 700;
 export function demoBackend(): Backend
 {
 	const fake = new FakeBackend();
-	fake.picks = ["C:\\Users\\me\\Downloads", "C:\\Users\\me\\Pictures"];
+	fake.picks = ["D:\\Archive\\2019", "D:\\Archive\\Camera"];
+	fake.suggestions = [
+		{ kind: "downloads", path: "C:\\Users\\me\\Downloads" },
+		{ kind: "desktop", path: "C:\\Users\\me\\Desktop" },
+		{ kind: "documents", path: "C:\\Users\\me\\OneDrive\\Documents" },
+		{ kind: "pictures", path: "C:\\Users\\me\\Pictures" },
+	];
 
 	return withOverrides(fake, {
 		start: async (roots, options) =>

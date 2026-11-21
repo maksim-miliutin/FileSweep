@@ -14,9 +14,18 @@ import type {
 	SkipReason,
 	SkipView,
 	Status,
+	SuggestedRoot,
 	Summary,
 } from "./types";
-import { BACKEND_ERROR_CODES, BackendError, INDEPENDENCE, PHASES, SCAN_STATES, SKIP_REASONS } from "./types";
+import {
+	BACKEND_ERROR_CODES,
+	BackendError,
+	INDEPENDENCE,
+	PHASES,
+	ROOT_KINDS,
+	SCAN_STATES,
+	SKIP_REASONS,
+} from "./types";
 
 export class DecodeError extends Error
 {
@@ -219,6 +228,21 @@ export function decodeSkipPage(value: unknown): SkipPage
 		offset: read(from, "skipped", "offset", count),
 		items: read(from, "skipped", "items", listOf(skipView)),
 	};
+}
+
+const suggestedRoot: Decoder<SuggestedRoot> = (value, at) =>
+{
+	const from = fields(value, at);
+
+	return {
+		kind: read(from, at, "kind", oneOf(ROOT_KINDS)),
+		path: read(from, at, "path", text),
+	};
+};
+
+export function decodeSuggestedRoots(value: unknown): SuggestedRoot[]
+{
+	return listOf(suggestedRoot)(value, "suggestions");
 }
 
 const SAID: Record<Exclude<BackendErrorCode, "unexpected">, string> = {

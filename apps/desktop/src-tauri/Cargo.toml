@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 filesweep-core = { path = "../../../crates/filesweep-core" }
 filesweep-session = { path = "../../../crates/filesweep-session" }
+serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 
