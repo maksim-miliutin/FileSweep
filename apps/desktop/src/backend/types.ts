@@ -165,6 +165,7 @@ export const BACKEND_ERROR_CODES = [
 	"spawn",
 	"staleScan",
 	"noSuchFile",
+	"revealFailed",
 ] as const;
 
 /** `unexpected` is everything that is not a refusal the session knows how to make. */

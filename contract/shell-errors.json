@@ -1,0 +1,5 @@
+{
+  "staleScan": { "code": "staleScan" },
+  "noSuchFile": { "code": "noSuchFile" },
+  "revealFailed": { "code": "revealFailed", "message": "the file manager did not answer" }
+}

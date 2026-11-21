@@ -28,6 +28,13 @@ interface Progress
 	bytesTotal: number;
 }
 
+export interface RevealedFile
+{
+	scanId: number;
+	groupId: number;
+	fileId: number;
+}
+
 interface FakeScan
 {
 	id: number;
@@ -47,6 +54,7 @@ interface FakeScan
 export class FakeBackend implements Backend
 {
 	readonly calls: string[] = [];
+	readonly revealed: RevealedFile[] = [];
 	picks: string[] = [];
 	suggestions: SuggestedRoot[] = [];
 
@@ -187,6 +195,20 @@ export class FakeBackend implements Backend
 	suggestedRoots(): Promise<SuggestedRoot[]>
 	{
 		return this.answer("suggestedRoots", () => this.suggestions.map(offer => ({ ...offer })));
+	}
+
+	reveal(scanId: number, groupId: number, fileId: number): Promise<void>
+	{
+		return this.answer("reveal", () =>
+		{
+			const group = this.named(scanId).groups.find(candidate => candidate.id === groupId);
+			if (group?.files.some(file => file.id === fileId) !== true)
+			{
+				throw new BackendError("noSuchFile", "the scan has no such group or file");
+			}
+
+			this.revealed.push({ scanId, groupId, fileId });
+		});
 	}
 
 	/** Every call goes through here: it is written down, and it can be made to fail. */
@@ -331,6 +353,7 @@ export function withOverrides(backend: Backend, overrides: Partial<Backend>): Ba
 		skipped: (scanId, query) => backend.skipped(scanId, query),
 		pickFolders: () => backend.pickFolders(),
 		suggestedRoots: () => backend.suggestedRoots(),
+		reveal: (scanId, groupId, fileId) => backend.reveal(scanId, groupId, fileId),
 		...overrides,
 	};
 }

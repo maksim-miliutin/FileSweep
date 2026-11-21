@@ -14,6 +14,7 @@ filesweep-session = { path = "../../../crates/filesweep-session" }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
 
 [dev-dependencies]
 filesweep-session = { path = "../../../crates/filesweep-session", features = ["testkit"] }

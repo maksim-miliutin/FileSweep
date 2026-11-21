@@ -3,7 +3,7 @@
 //! `scanId` in the interface. `contract/commands.json` holds both sides to
 //! the same names.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use filesweep_core::ScanPolicy;
 use filesweep_session::{
@@ -110,4 +110,59 @@ pub(crate) fn suggested_roots<R: Runtime>(app: AppHandle<R>) -> Vec<SuggestedRoo
         (RootKind::Documents, folders.document_dir().ok()),
         (RootKind::Pictures, folders.picture_dir().ok()),
     ])
+}
+
+type Reveal = dyn Fn(&Path) -> Result<(), String> + Send + Sync;
+
+/// Behind a function so that the tests can stand in for the file manager.
+pub(crate) struct Revealer(Box<Reveal>);
+
+impl Revealer {
+    pub(crate) fn new(
+        reveal: impl Fn(&Path) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Box::new(reveal))
+    }
+
+    /// Explorer, with the file selected. The opener plugin is used as a
+    /// library and never registered: registered, its commands would let the
+    /// window open any path or address it names.
+    pub(crate) fn system() -> Self {
+        Self::new(|path| {
+            tauri_plugin_opener::reveal_item_in_dir(path).map_err(|error| error.to_string())
+        })
+    }
+}
+
+/// The session's refusals, and the one the system adds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "code", rename_all = "camelCase")]
+pub(crate) enum ShellError {
+    StaleScan,
+    NoSuchFile,
+    RevealFailed { message: String },
+}
+
+impl From<QueryError> for ShellError {
+    fn from(error: QueryError) -> Self {
+        match error {
+            QueryError::StaleScan => Self::StaleScan,
+            QueryError::NoSuchFile => Self::NoSuchFile,
+        }
+    }
+}
+
+/// The window names the file by the ids of a page it was given and never
+/// sends a path, so nothing but a file of the scan can be shown.
+#[tauri::command(async)]
+pub(crate) fn reveal_file(
+    session: State<'_, Session>,
+    revealer: State<'_, Revealer>,
+    scan_id: u64,
+    group_id: u64,
+    file_id: u64,
+) -> Result<(), ShellError> {
+    let path = session.file_path(scan_id, group_id, file_id)?;
+
+    (revealer.0)(&path).map_err(|message| ShellError::RevealFailed { message })
 }

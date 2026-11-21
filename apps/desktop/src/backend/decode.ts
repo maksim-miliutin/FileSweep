@@ -245,6 +245,15 @@ export function decodeSuggestedRoots(value: unknown): SuggestedRoot[]
 	return listOf(suggestedRoot)(value, "suggestions");
 }
 
+/** For a command that answers with nothing when it succeeds. */
+export function decodeNothing(value: unknown): void
+{
+	if (value !== null && value !== undefined)
+	{
+		refuse("answer", "nothing", value);
+	}
+}
+
 const SAID: Record<Exclude<BackendErrorCode, "unexpected">, string> = {
 	busy: "a scan is already running",
 	noRoots: "no folder was given to scan",
@@ -253,6 +262,7 @@ const SAID: Record<Exclude<BackendErrorCode, "unexpected">, string> = {
 	spawn: "the scan could not be started",
 	staleScan: "the results belong to an earlier scan",
 	noSuchFile: "the scan has no such group or file",
+	revealFailed: "the file could not be shown in its folder",
 };
 
 /**
