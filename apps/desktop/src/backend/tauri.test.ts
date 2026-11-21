@@ -62,6 +62,10 @@ test("every call sends the command and the arguments the contract lists", async 
 			answer: skipped,
 			call: backend => backend.skipped(1, { offset: 0, limit: 200 }),
 		},
+		suggestedRoots: {
+			answer: contract("suggested-roots.json"),
+			call: backend => backend.suggestedRoots(),
+		},
 	};
 
 	expect(Object.keys(ask).sort()).toEqual(Object.keys(examples).sort());

@@ -42,6 +42,16 @@ export const INDEPENDENCE = ["verified", "unverified"] as const;
 /** `unverified`: two entries of a group may be one file on disk, so no saving is promised. */
 export type Independence = (typeof INDEPENDENCE)[number];
 
+export const ROOT_KINDS = ["downloads", "desktop", "documents", "pictures"] as const;
+
+export type RootKind = (typeof ROOT_KINDS)[number];
+
+export interface SuggestedRoot
+{
+	kind: RootKind;
+	path: string;
+}
+
 export interface Status
 {
 	state: ScanState;

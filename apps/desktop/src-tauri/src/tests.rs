@@ -6,6 +6,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use filesweep_session::{Session, testkit};
+
+use crate::commands::{RootKind, SuggestedRoot, suggestions};
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{INVOKE_KEY, MockRuntime, mock_builder, mock_context, noop_assets};
@@ -98,7 +100,7 @@ fn every_command_in_the_contract_is_answered() {
     let window = window();
     let examples = contract("commands.json");
     let examples = examples.as_object().expect("the contract is an object");
-    assert_eq!(examples.len(), 7);
+    assert_eq!(examples.len(), 8);
 
     for (name, example) in examples {
         let command = example["command"].as_str().expect("a command has a name");
@@ -237,4 +239,92 @@ fn pause_resume_and_cancel_reach_the_running_scan() {
 
     assert_eq!(window.state_after("scan_cancel"), Ok(json!("stopping")));
     assert!(director.is_cancelled());
+}
+
+#[test]
+fn suggestions_keep_the_folders_that_exist_in_the_order_given() {
+    let home = tempfile::tempdir().expect("a temporary folder");
+    let downloads = home.path().join("Downloads");
+    let pictures = home.path().join("Pictures");
+    std::fs::create_dir(&downloads).expect("a folder in the temporary folder");
+    std::fs::create_dir(&pictures).expect("a folder in the temporary folder");
+
+    let offered = suggestions([
+        (RootKind::Downloads, Some(downloads.clone())),
+        // The system names a folder that is not there.
+        (RootKind::Desktop, Some(home.path().join("Desktop"))),
+        // The system cannot name the folder at all.
+        (RootKind::Documents, None),
+        (RootKind::Pictures, Some(pictures.clone())),
+    ]);
+
+    let expected = [
+        (RootKind::Downloads, downloads),
+        (RootKind::Pictures, pictures),
+    ]
+    .map(|(kind, path)| SuggestedRoot {
+        kind,
+        path: path.to_string_lossy().into_owned(),
+    });
+    assert_eq!(offered, expected);
+}
+
+#[test]
+fn a_file_is_not_offered_as_a_folder() {
+    let home = tempfile::tempdir().expect("a temporary folder");
+    let folder = home.path().join("Pictures");
+    let file = home.path().join("Downloads");
+    std::fs::create_dir(&folder).expect("a folder in the temporary folder");
+    std::fs::write(&file, b"not a folder").expect("a file in the temporary folder");
+
+    let offered = suggestions([
+        (RootKind::Downloads, Some(file)),
+        (RootKind::Pictures, Some(folder)),
+    ]);
+
+    let kinds: Vec<RootKind> = offered.iter().map(|offer| offer.kind).collect();
+    assert_eq!(kinds, [RootKind::Pictures]);
+}
+
+#[test]
+fn suggestions_have_the_shape_and_the_names_the_contract_lists() {
+    let example = contract("suggested-roots.json");
+    let kinds = [
+        RootKind::Downloads,
+        RootKind::Desktop,
+        RootKind::Documents,
+        RootKind::Pictures,
+    ];
+    let offered: Vec<SuggestedRoot> = kinds
+        .iter()
+        .zip(["Downloads", "Desktop", "Documents", "Pictures"])
+        .map(|(&kind, folder)| SuggestedRoot {
+            kind,
+            path: format!("/home/me/{folder}"),
+        })
+        .collect();
+
+    assert_eq!(serde_json::to_value(&offered).expect("json"), example);
+    assert_eq!(
+        serde_json::to_value(kinds).expect("json"),
+        contract("names.json")["rootKinds"]
+    );
+}
+
+#[test]
+fn suggested_roots_are_answered_through_the_ipc() {
+    let window = window();
+    let known = contract("names.json")["rootKinds"].clone();
+
+    let offered = window
+        .invoke("suggested_roots", json!({}))
+        .expect("suggestions are always given");
+
+    // Which folders this machine has is not the test's business; that each
+    // offer is well formed is.
+    for offer in offered.as_array().expect("a list of offers") {
+        let kinds = known.as_array().expect("a list of names");
+        assert!(kinds.contains(&offer["kind"]), "{offer}");
+        assert!(offer["path"].is_string(), "{offer}");
+    }
 }

@@ -9,7 +9,8 @@ use filesweep_core::ScanPolicy;
 use filesweep_session::{
     GroupPage, GroupQuery, PageQuery, QueryError, Session, SkipPage, StartError, Status,
 };
-use tauri::State;
+use serde::Serialize;
+use tauri::{AppHandle, Manager, Runtime, State};
 
 #[tauri::command(async)]
 pub(crate) fn scan_start(
@@ -61,4 +62,52 @@ pub(crate) fn scan_skipped(
     query: PageQuery,
 ) -> Result<SkipPage, QueryError> {
     session.skipped(scan_id, &query)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SuggestedRoot {
+    pub(crate) kind: RootKind,
+    pub(crate) path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum RootKind {
+    Downloads,
+    Desktop,
+    Documents,
+    Pictures,
+}
+
+/// A known folder that is missing, or that the system has no name for, is
+/// simply not offered.
+pub(crate) fn suggestions(
+    known: impl IntoIterator<Item = (RootKind, Option<PathBuf>)>,
+) -> Vec<SuggestedRoot> {
+    known
+        .into_iter()
+        .filter_map(|(kind, path)| {
+            let path = path.filter(|path| path.is_dir())?;
+
+            Some(SuggestedRoot {
+                kind,
+                path: path.to_string_lossy().into_owned(),
+            })
+        })
+        .collect()
+}
+
+/// The user's own folders, as Windows knows them: a Documents folder moved
+/// into OneDrive is found where it really is. A whole drive is never offered.
+#[tauri::command(async)]
+pub(crate) fn suggested_roots<R: Runtime>(app: AppHandle<R>) -> Vec<SuggestedRoot> {
+    let folders = app.path();
+
+    suggestions([
+        (RootKind::Downloads, folders.download_dir().ok()),
+        (RootKind::Desktop, folders.desktop_dir().ok()),
+        (RootKind::Documents, folders.document_dir().ok()),
+        (RootKind::Pictures, folders.picture_dir().ok()),
+    ])
 }

@@ -1,8 +1,15 @@
 import { describe, expect, test } from "vitest";
 
 import { contract, contractObject } from "../test-contract";
-import { DecodeError, decodeError, decodeGroupPage, decodeSkipPage, decodeStatus } from "./decode";
-import { BackendError, PHASES, SCAN_STATES, SKIP_REASONS } from "./types";
+import {
+	DecodeError,
+	decodeError,
+	decodeGroupPage,
+	decodeSkipPage,
+	decodeStatus,
+	decodeSuggestedRoots,
+} from "./decode";
+import { BackendError, PHASES, ROOT_KINDS, SCAN_STATES, SKIP_REASONS } from "./types";
 
 // A decoder builds its answer field by field. Being equal to the example
 // therefore means two things: nothing the interface needs is missing from
@@ -22,6 +29,11 @@ describe("the examples both sides are held to", () =>
 	test("the group page decodes to exactly itself", () =>
 	{
 		expect(decodeGroupPage(contract("groups-page.json"))).toEqual(contract("groups-page.json"));
+	});
+
+	test("the suggested folders decode to exactly themselves", () =>
+	{
+		expect(decodeSuggestedRoots(contract("suggested-roots.json"))).toEqual(contract("suggested-roots.json"));
 	});
 
 	test("the skipped page decodes to exactly itself", () =>
@@ -46,6 +58,7 @@ describe("the examples both sides are held to", () =>
 
 		expect(names.states).toEqual([...SCAN_STATES]);
 		expect(names.phases).toEqual([...PHASES]);
+		expect(names.rootKinds).toEqual([...ROOT_KINDS]);
 		expect(skipped.items.map(item => item.reason)).toEqual([...SKIP_REASONS]);
 	});
 
@@ -104,6 +117,14 @@ describe("a message of the wrong shape", () =>
 		status.scan.skippedByReason = { gremlins: 3 };
 
 		expect(() => decodeStatus(status)).toThrow("status.scan.skippedByReason.gremlins");
+	});
+
+	test("is refused when a suggested folder is of a kind the interface does not know", () =>
+	{
+		const offers = [{ kind: "music", path: "/home/me/Music" }];
+
+		expect(() => decodeSuggestedRoots(offers)).toThrow("suggestions[0].kind");
+		expect(() => decodeSuggestedRoots({})).toThrow(DecodeError);
 	});
 
 	test("is refused when it is not an object at all", () =>

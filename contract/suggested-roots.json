@@ -1,0 +1,6 @@
+[
+  { "kind": "downloads", "path": "/home/me/Downloads" },
+  { "kind": "desktop", "path": "/home/me/Desktop" },
+  { "kind": "documents", "path": "/home/me/Documents" },
+  { "kind": "pictures", "path": "/home/me/Pictures" }
+]

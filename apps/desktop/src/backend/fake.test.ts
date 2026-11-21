@@ -180,3 +180,13 @@ test("one answer can be replaced while the rest stay the fake's", async () =>
 	expect((await backend.pause()).state).toBe("paused");
 	expect(fake.calls).toEqual(["start", "pause"]);
 });
+
+test("the folders it suggests are the ones the test gave it", async () =>
+{
+	const fake = new FakeBackend();
+	expect(await fake.suggestedRoots()).toEqual([]);
+
+	fake.suggestions = [{ kind: "downloads", path: "/home/me/Downloads" }];
+
+	expect(await fake.suggestedRoots()).toEqual([{ kind: "downloads", path: "/home/me/Downloads" }]);
+});

@@ -11,6 +11,7 @@ import type {
 	SkipReason,
 	SkipView,
 	Status,
+	SuggestedRoot,
 } from "./types";
 import { BackendError } from "./types";
 
@@ -47,6 +48,7 @@ export class FakeBackend implements Backend
 {
 	readonly calls: string[] = [];
 	picks: string[] = [];
+	suggestions: SuggestedRoot[] = [];
 
 	/** The options of the last start that was accepted. */
 	startedWith: StartOptions | null = null;
@@ -180,6 +182,11 @@ export class FakeBackend implements Backend
 	pickFolders(): Promise<string[]>
 	{
 		return this.answer("pickFolders", () => [...this.picks]);
+	}
+
+	suggestedRoots(): Promise<SuggestedRoot[]>
+	{
+		return this.answer("suggestedRoots", () => this.suggestions.map(offer => ({ ...offer })));
 	}
 
 	/** Every call goes through here: it is written down, and it can be made to fail. */
@@ -323,6 +330,7 @@ export function withOverrides(backend: Backend, overrides: Partial<Backend>): Ba
 		groups: (scanId, query) => backend.groups(scanId, query),
 		skipped: (scanId, query) => backend.skipped(scanId, query),
 		pickFolders: () => backend.pickFolders(),
+		suggestedRoots: () => backend.suggestedRoots(),
 		...overrides,
 	};
 }
