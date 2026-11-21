@@ -30,6 +30,42 @@ cargo test
 cargo build --release
 ```
 
+These build and test the libraries. The desktop shell is checked on its own,
+because it needs a WebView to build: Windows has one, and on Linux it takes
+the WebKitGTK development packages from the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+```
+cargo test -p filesweep-desktop
+```
+
+## Running the desktop app
+
+You also need [Node.js](https://nodejs.org) 22 or newer.
+
+```
+cd apps/desktop
+npm install
+npm run tauri dev
+```
+
+The first run compiles the shell, which takes a few minutes. The window is a
+plain working page for now: choose folders, run a scan, pause or cancel it,
+and read the groups of identical files and the entries that were skipped. It
+removes nothing.
+
+`npm run dev` alone serves the same page to a browser, where a demo backend
+plays a short scan from memory and no disk is read.
+
+The checks of the interface code, from the same folder:
+
+```
+npm run lint
+npx tsc --noEmit
+npm test
+npm run build
+```
+
 ## Trying the scanner
 
 ```
@@ -44,8 +80,12 @@ and a summary. It changes nothing on disk.
 - `crates/filesweep-core`: the read-only scanner library.
 - `crates/filesweep-session`: runs a scan in the background and serves its
   progress and results to an interface, as a status snapshot and pages.
-- `contract/`: examples of the messages an interface exchanges with the
-  session. Both sides are tested against them.
+- `apps/desktop`: the interface, written in React and TypeScript and built
+  with Vite.
+- `apps/desktop/src-tauri`: the desktop shell, a Tauri window whose commands
+  carry the interface's calls to the session.
+- `contract/`: examples of the messages and calls the interface exchanges
+  with the session. Both sides are tested against them.
 
 ## License
 

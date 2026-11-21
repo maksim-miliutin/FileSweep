@@ -16,8 +16,8 @@ mod results;
 mod session;
 #[cfg(test)]
 mod session_tests;
-#[cfg(test)]
-mod testkit;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 mod view;
 
 pub use error::{QueryError, StartError};

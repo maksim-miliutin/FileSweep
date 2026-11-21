@@ -3,19 +3,79 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::mpsc::{Sender, channel};
+use std::time::{Duration, Instant};
 
 use filesweep_core::{Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanSummary};
 use filesweep_core::{SkipReason, SkipReason::AccessDenied};
 
 use crate::error::{QueryError, StartError};
-use crate::session::{MAX_ROOTS, Session};
-use crate::testkit::{
-    Director, QUIET, duplicates, gated, group, root, script, skip, summary, wait_for,
-};
+use crate::session::{Engine, MAX_ROOTS, Session};
+use crate::testkit::{Director, PATIENCE, group, root, script, skip, summary};
 use crate::view::{
     GroupPage, GroupQuery, GroupSort, MAX_PAGE, PageQuery, Phase, SkipCode, State, Status,
     SummaryView,
 };
+
+/// How long a test watches for something that must not happen.
+const QUIET: Duration = Duration::from_millis(300);
+
+/// Polls the status until it is what the test waits for. A session that
+/// never gets there fails the test with its last status instead of hanging.
+fn wait_for(session: &Session, wanted: impl Fn(&Status) -> bool) -> Status {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        let status = session.status();
+        if wanted(&status) {
+            return status;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the session never got there; its last status: {status:?}"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// Lets a held engine go.
+struct Gate {
+    opening: Sender<()>,
+}
+
+impl Gate {
+    fn open(self) {
+        self.opening.send(()).expect("the engine waits at the gate");
+    }
+}
+
+/// Holds `engine` back until its gate is opened, so a test can act on a scan
+/// that is known not to have begun. A gate dropped unopened ends the scan as
+/// cancelled without ever running the engine.
+fn gated(engine: impl Engine) -> (impl Engine, Gate) {
+    let (opening, opened) = channel();
+
+    let held = move |request: &filesweep_core::ScanRequest,
+                     control: &filesweep_core::ScanControl,
+                     sink: &mut dyn FnMut(ScanEvent)| match opened.recv() {
+        Ok(()) => engine(request, control, sink),
+        Err(_) => Ok(summary(Outcome::Cancelled)),
+    };
+
+    (held, Gate { opening })
+}
+
+/// A temporary folder with one pair of identical files, for the real scanner.
+fn duplicates() -> tempfile::TempDir {
+    let tree = tempfile::tempdir().expect("a temporary folder");
+    for name in ["one.bin", "two.bin"] {
+        std::fs::write(tree.path().join(name), b"the same bytes twice")
+            .expect("a file in the temporary folder");
+    }
+
+    tree
+}
 
 /// Starts a scripted scan of one root and hands back its director.
 fn started(session: &Session) -> Director {
@@ -37,7 +97,7 @@ fn ended(session: &Session) -> Status {
 }
 
 /// Starts the real scanner on `tree`, held at a gate until the test opens it.
-fn started_at_a_gate(session: &Session, tree: &tempfile::TempDir) -> crate::testkit::Gate {
+fn started_at_a_gate(session: &Session, tree: &tempfile::TempDir) -> Gate {
     let (engine, gate) = gated(filesweep_core::scan);
     session
         .start_with(
