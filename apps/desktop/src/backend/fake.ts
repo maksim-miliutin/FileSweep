@@ -55,6 +55,12 @@ export class FakeBackend implements Backend
 	private lastId = 0;
 	private failure: Error | null = null;
 
+	/** The state as a status call would report it, without making a call. */
+	get state(): ScanState
+	{
+		return this.scan?.state ?? "idle";
+	}
+
 	failNext(error: Error): void
 	{
 		this.failure = error;
@@ -303,5 +309,20 @@ export function sampleGroup(size: number, reclaimableBytes: number): Omit<GroupV
 		independence: "verified",
 		reclaimableBytes,
 		files: [file(0, "one.bin"), file(1, "two.bin")],
+	};
+}
+
+export function withOverrides(backend: Backend, overrides: Partial<Backend>): Backend
+{
+	return {
+		start: (roots, options) => backend.start(roots, options),
+		pause: () => backend.pause(),
+		resume: () => backend.resume(),
+		cancel: () => backend.cancel(),
+		status: () => backend.status(),
+		groups: (scanId, query) => backend.groups(scanId, query),
+		skipped: (scanId, query) => backend.skipped(scanId, query),
+		pickFolders: () => backend.pickFolders(),
+		...overrides,
 	};
 }

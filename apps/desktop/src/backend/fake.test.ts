@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { decodeGroupPage, decodeSkipPage, decodeStatus } from "./decode";
-import { FakeBackend, sampleGroup } from "./fake";
+import { FakeBackend, sampleGroup, withOverrides } from "./fake";
 import { BackendError } from "./types";
 
 const options = { includeHidden: false };
@@ -151,10 +151,32 @@ test("a test can make the next call fail and can see what was called", async () 
 	expect(fake.calls).toEqual(["status", "status"]);
 });
 
+test("its state can be read without a call", async () =>
+{
+	const fake = new FakeBackend();
+	expect(fake.state).toBe("idle");
+
+	await fake.start(["/a"], options);
+	await fake.pause();
+	expect(fake.state).toBe("paused");
+	expect(fake.calls).toEqual(["start", "pause"]);
+});
+
 test("the folders it offers are the ones the test chose", async () =>
 {
 	const fake = new FakeBackend();
 	fake.picks = ["/home/me/Downloads"];
 
 	expect(await fake.pickFolders()).toEqual(["/home/me/Downloads"]);
+});
+
+test("one answer can be replaced while the rest stay the fake's", async () =>
+{
+	const fake = new FakeBackend();
+	const backend = withOverrides(fake, { pickFolders: () => Promise.resolve(["/chosen"]) });
+
+	expect(await backend.pickFolders()).toEqual(["/chosen"]);
+	expect((await backend.start(["/a"], options)).state).toBe("scanning");
+	expect((await backend.pause()).state).toBe("paused");
+	expect(fake.calls).toEqual(["start", "pause"]);
 });

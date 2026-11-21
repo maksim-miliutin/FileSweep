@@ -1,0 +1,31 @@
+/* Only what a plain page needs to be readable. The look of the application
+   comes with its real interface. */
+
+:root {
+	color-scheme: light dark;
+	font-family: "Segoe UI", system-ui, sans-serif;
+	line-height: 1.5;
+}
+
+body {
+	margin: 0;
+}
+
+main {
+	margin: 0 auto;
+	max-width: 60rem;
+	padding: 1.5rem;
+}
+
+button {
+	font: inherit;
+	padding: 0.25rem 0.75rem;
+}
+
+li {
+	overflow-wrap: anywhere;
+}
+
+[role="alert"] {
+	font-weight: 600;
+}

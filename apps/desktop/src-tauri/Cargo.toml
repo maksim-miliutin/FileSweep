@@ -6,12 +6,12 @@ description = "The FileSweep desktop application"
 publish = false
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 filesweep-core = { path = "../../../crates/filesweep-core" }
 filesweep-session = { path = "../../../crates/filesweep-session" }
-tauri = "2"
+tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 
 [dev-dependencies]

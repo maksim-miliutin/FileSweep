@@ -49,8 +49,13 @@ npm install
 npm run tauri dev
 ```
 
-The first run compiles the shell, which takes a few minutes. The window is an
-empty frame so far: it shows the name of the application and nothing else.
+The first run compiles the shell, which takes a few minutes. The window is a
+plain working page for now: choose folders, run a scan, pause or cancel it,
+and read the groups of identical files and the entries that were skipped. It
+removes nothing.
+
+`npm run dev` alone serves the same page to a browser, where a demo backend
+plays a short scan from memory and no disk is read.
 
 The checks of the interface code, from the same folder:
 
