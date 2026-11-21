@@ -190,3 +190,26 @@ test("the folders it suggests are the ones the test gave it", async () =>
 
 	expect(await fake.suggestedRoots()).toEqual([{ kind: "downloads", path: "/home/me/Downloads" }]);
 });
+
+test("a file of the current scan is shown by its ids", async () =>
+{
+	const fake = new FakeBackend();
+	const scanId = (await fake.start(["/a"], options)).scan?.id ?? 0;
+	fake.find(sampleGroup(100, 100));
+
+	await fake.reveal(scanId, 0, 1);
+
+	expect(fake.revealed).toEqual([{ scanId, groupId: 0, fileId: 1 }]);
+});
+
+test("a file of an earlier scan, or one the scan does not have, is refused and not shown", async () =>
+{
+	const fake = new FakeBackend();
+	const scanId = (await fake.start(["/a"], options)).scan?.id ?? 0;
+	fake.find(sampleGroup(100, 100));
+
+	expect(await refusalOf(fake.reveal(scanId + 1, 0, 0))).toMatchObject({ code: "staleScan" });
+	expect(await refusalOf(fake.reveal(scanId, 1, 0))).toMatchObject({ code: "noSuchFile" });
+	expect(await refusalOf(fake.reveal(scanId, 0, 2))).toMatchObject({ code: "noSuchFile" });
+	expect(fake.revealed).toEqual([]);
+});

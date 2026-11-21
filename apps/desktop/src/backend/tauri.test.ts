@@ -66,6 +66,7 @@ test("every call sends the command and the arguments the contract lists", async 
 			answer: contract("suggested-roots.json"),
 			call: backend => backend.suggestedRoots(),
 		},
+		reveal: { answer: null, call: backend => backend.reveal(1, 2, 3) },
 	};
 
 	expect(Object.keys(ask).sort()).toEqual(Object.keys(examples).sort());
@@ -88,6 +89,12 @@ test("the choice about hidden files is sent as it was made", async () =>
 	await backend.start(["/a"], { includeHidden: true });
 
 	expect(calls).toEqual([{ command: "scan_start", payload: { roots: ["/a"], includeHidden: true } }]);
+});
+
+test("showing a file answers with nothing, and an answer with something in it is refused", async () =>
+{
+	await expect(recording(null).backend.reveal(1, 2, 3)).resolves.toBeUndefined();
+	await expect(recording({ shown: true }).backend.reveal(1, 2, 3)).rejects.toBeInstanceOf(DecodeError);
 });
 
 test("an answer comes back decoded", async () =>

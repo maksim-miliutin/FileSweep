@@ -15,5 +15,9 @@
     "command": "scan_skipped",
     "payload": { "scanId": 1, "query": { "offset": 0, "limit": 200 } }
   },
-  "suggestedRoots": { "command": "suggested_roots", "payload": {} }
+  "suggestedRoots": { "command": "suggested_roots", "payload": {} },
+  "reveal": {
+    "command": "reveal_file",
+    "payload": { "scanId": 1, "groupId": 2, "fileId": 3 }
+  }
 }

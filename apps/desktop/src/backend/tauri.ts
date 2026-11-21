@@ -1,5 +1,5 @@
 import type { Backend } from "./backend";
-import { decodeError, decodeGroupPage, decodeSkipPage, decodeStatus, decodeSuggestedRoots } from "./decode";
+import { decodeError, decodeGroupPage, decodeNothing, decodeSkipPage, decodeStatus, decodeSuggestedRoots } from "./decode";
 
 /** Tauri's `invoke`, or anything that stands in for it. */
 export type Invoke = (command: string, payload: Record<string, unknown>) => Promise<unknown>;
@@ -36,5 +36,6 @@ export function tauriBackend(invoke: Invoke, pickFolders: () => Promise<string[]
 		skipped: (scanId, query) => ask("scan_skipped", { scanId, query }, decodeSkipPage),
 		pickFolders,
 		suggestedRoots: () => ask("suggested_roots", {}, decodeSuggestedRoots),
+		reveal: (scanId, groupId, fileId) => ask("reveal_file", { scanId, groupId, fileId }, decodeNothing),
 	};
 }

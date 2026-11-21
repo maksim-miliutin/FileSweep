@@ -62,9 +62,9 @@ describe("the examples both sides are held to", () =>
 		expect(skipped.items.map(item => item.reason)).toEqual([...SKIP_REASONS]);
 	});
 
-	test("every refusal becomes an error with its code and its details", () =>
+	test.each(["errors.json", "shell-errors.json"])("every refusal in %s becomes an error with its code and its details", (file) =>
 	{
-		const examples = contractObject("errors.json");
+		const examples = contractObject(file);
 
 		for (const [name, example] of Object.entries(examples))
 		{

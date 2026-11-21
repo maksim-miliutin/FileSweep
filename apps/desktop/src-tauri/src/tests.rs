@@ -2,12 +2,14 @@
 //! mock runtime, with the names and argument shapes of
 //! `contract/commands.json`. No window is shown and no WebView is needed.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use filesweep_core::{DuplicateGroup, ScanEvent};
 use filesweep_session::{Session, testkit};
 
-use crate::commands::{RootKind, SuggestedRoot, suggestions};
+use crate::commands::{Revealer, RootKind, ShellError, SuggestedRoot, suggestions};
 use serde_json::{Value, json};
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{INVOKE_KEY, MockRuntime, mock_builder, mock_context, noop_assets};
@@ -19,20 +21,60 @@ struct Window {
     webview: WebviewWindow<MockRuntime>,
     // Dropping the application would take the session and the window with it.
     app: App<MockRuntime>,
+    revealed: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 fn window() -> Window {
-    let app = crate::shell(mock_builder())
+    window_revealing(Ok(()))
+}
+
+/// The revealer of this window writes down every path it is given and
+/// answers each with `answer`. No file manager is opened.
+fn window_revealing(answer: Result<(), String>) -> Window {
+    let revealed = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&revealed);
+    let revealer = Revealer::new(move |path| {
+        log.lock()
+            .expect("no test panicked while holding the log")
+            .push(path.to_path_buf());
+        answer.clone()
+    });
+
+    let app = crate::shell(mock_builder(), revealer)
         .build(mock_context(noop_assets()))
         .expect("the application builds on the mock runtime");
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .expect("a mock window opens");
 
-    Window { webview, app }
+    Window {
+        webview,
+        app,
+        revealed,
+    }
 }
 
 impl Window {
+    fn revealed(&self) -> Vec<PathBuf> {
+        self.revealed
+            .lock()
+            .expect("no test panicked while holding the log")
+            .clone()
+    }
+
+    /// A scripted scan that has found one group of two files and stands
+    /// still. The director has to be kept: dropping it ends the scan.
+    fn scan_with_one_group(&self) -> (u64, DuplicateGroup, testkit::Director) {
+        let session = self.app.state::<Session>();
+        let (started, director) = testkit::start_scripted(&session, vec![testkit::root()])
+            .expect("a scripted scan starts");
+        let group = testkit::group(4096, 4096);
+        director.emit(ScanEvent::Group(group.clone()));
+        let scan_id = started.scan.expect("a started scan is described").id;
+
+        (scan_id, group, director)
+    }
+
     /// Calls a command the way the interface does. `Err` is what the
     /// interface would see rejected: a coded refusal of ours, or Tauri's own
     /// text when it could not find the command or read an argument.
@@ -100,7 +142,7 @@ fn every_command_in_the_contract_is_answered() {
     let window = window();
     let examples = contract("commands.json");
     let examples = examples.as_object().expect("the contract is an object");
-    assert_eq!(examples.len(), 8);
+    assert_eq!(examples.len(), 9);
 
     for (name, example) in examples {
         let command = example["command"].as_str().expect("a command has a name");
@@ -326,5 +368,82 @@ fn suggested_roots_are_answered_through_the_ipc() {
         let kinds = known.as_array().expect("a list of names");
         assert!(kinds.contains(&offer["kind"]), "{offer}");
         assert!(offer["path"].is_string(), "{offer}");
+    }
+}
+
+#[test]
+fn a_file_named_by_its_ids_is_revealed_at_its_exact_path() {
+    let window = window();
+    let (scan_id, group, _director) = window.scan_with_one_group();
+
+    let answer = window.invoke(
+        "reveal_file",
+        json!({ "scanId": scan_id, "groupId": 0, "fileId": 1 }),
+    );
+
+    assert_eq!(answer, Ok(Value::Null));
+    assert_eq!(window.revealed(), group.files[1].paths[..1]);
+}
+
+#[test]
+fn a_reveal_of_an_earlier_scan_or_a_missing_file_is_refused_and_reveals_nothing() {
+    let window = window();
+    let (scan_id, _, _director) = window.scan_with_one_group();
+    let reveal = |scan_id: u64, group_id: u64, file_id: u64| {
+        window.invoke(
+            "reveal_file",
+            json!({ "scanId": scan_id, "groupId": group_id, "fileId": file_id }),
+        )
+    };
+
+    assert_eq!(
+        reveal(scan_id + 1, 0, 0),
+        Err(json!({ "code": "staleScan" }))
+    );
+    assert_eq!(reveal(scan_id, 1, 0), Err(json!({ "code": "noSuchFile" })));
+    assert_eq!(reveal(scan_id, 0, 2), Err(json!({ "code": "noSuchFile" })));
+    assert_eq!(window.revealed(), Vec::<PathBuf>::new());
+}
+
+#[test]
+fn a_reveal_the_system_could_not_do_reaches_the_window_as_a_code() {
+    let window = window_revealing(Err("the file manager did not answer".to_owned()));
+    let (scan_id, _, _director) = window.scan_with_one_group();
+
+    let answer = window.invoke(
+        "reveal_file",
+        json!({ "scanId": scan_id, "groupId": 0, "fileId": 0 }),
+    );
+
+    assert_eq!(
+        answer,
+        Err(json!({ "code": "revealFailed", "message": "the file manager did not answer" }))
+    );
+}
+
+#[test]
+fn shell_refusals_have_the_shape_the_contract_lists() {
+    let example = contract("shell-errors.json");
+    let refusals = [
+        ("staleScan", ShellError::StaleScan),
+        ("noSuchFile", ShellError::NoSuchFile),
+        (
+            "revealFailed",
+            ShellError::RevealFailed {
+                message: "the file manager did not answer".to_owned(),
+            },
+        ),
+    ];
+
+    assert_eq!(
+        example.as_object().map(|listed| listed.len()),
+        Some(refusals.len())
+    );
+    for (name, refusal) in refusals {
+        assert_eq!(
+            serde_json::to_value(&refusal).expect("json"),
+            example[name],
+            "{name}"
+        );
     }
 }

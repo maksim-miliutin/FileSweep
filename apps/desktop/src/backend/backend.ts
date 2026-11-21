@@ -23,4 +23,10 @@ export interface Backend
 	/** An empty list means the user changed their mind. */
 	pickFolders(): Promise<string[]>;
 	suggestedRoots(): Promise<SuggestedRoot[]>;
+
+	/**
+	 * Opens the folder of a file of the scan with the file selected. The file
+	 * is named by the ids of the page it came in, never by its path.
+	 */
+	reveal(scanId: number, groupId: number, fileId: number): Promise<void>;
 }
