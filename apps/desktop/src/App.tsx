@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Backend } from "./backend/backend";
-import type { GroupView, SkipView, Status } from "./backend/types";
+import type { GroupView, SkipView, Status, SuggestedRoot } from "./backend/types";
 import { text } from "./strings";
 import { FIRST_ROWS, isRunning, useRows, useScan } from "./useScan";
 
@@ -17,23 +17,55 @@ export function App({ backend }: AppProps)
 	const rows = useRows(backend, scan.status);
 	const [folders, setFolders] = useState<string[]>([]);
 	const [includeHidden, setIncludeHidden] = useState(false);
-	const [dialogError, setDialogError] = useState<Error | null>(null);
+	const [suggestions, setSuggestions] = useState<SuggestedRoot[]>([]);
+	const [folderError, setFolderError] = useState<Error | null>(null);
 
 	const { state } = scan.status;
 	const running = isRunning(state);
-	const error = scan.error ?? dialogError ?? rows.error;
+	const error = scan.error ?? folderError ?? rows.error;
+	const offers = suggestions.filter(offer => !folders.includes(offer.path));
+
+	useEffect(() =>
+	{
+		let current = true;
+		backend.suggestedRoots().then(
+			(found) =>
+			{
+				if (current)
+				{
+					setSuggestions(found);
+				}
+			},
+			(failure: unknown) =>
+			{
+				if (current)
+				{
+					setFolderError(asError(failure));
+				}
+			},
+		);
+
+		return () =>
+		{
+			current = false;
+		};
+	}, [backend]);
+
+	const add = (picked: readonly string[]): void =>
+	{
+		setFolders(chosen => [...chosen, ...picked.filter(folder => !chosen.includes(folder))]);
+	};
 
 	const addFolders = async (): Promise<void> =>
 	{
 		try
 		{
-			const picked = await backend.pickFolders();
-			setFolders(chosen => [...chosen, ...picked.filter(folder => !chosen.includes(folder))]);
-			setDialogError(null);
+			add(await backend.pickFolders());
+			setFolderError(null);
 		}
 		catch (failure)
 		{
-			setDialogError(failure instanceof Error ? failure : new Error(String(failure)));
+			setFolderError(asError(failure));
 		}
 	};
 
@@ -85,6 +117,28 @@ export function App({ backend }: AppProps)
 						{text.includeHidden}
 					</label>
 				</p>
+				{offers.length > 0 && (
+					<p>
+						{text.suggested}
+						{offers.map(offer => (
+							<span key={offer.kind}>
+								{" "}
+								<button
+									type="button"
+									aria-label={text.addSuggested(text.rootKinds[offer.kind])}
+									title={offer.path}
+									disabled={running}
+									onClick={() =>
+									{
+										add([offer.path]);
+									}}
+								>
+									{text.rootKinds[offer.kind]}
+								</button>
+							</span>
+						))}
+					</p>
+				)}
 				<p>
 					<button
 						type="button"
@@ -136,6 +190,11 @@ export function App({ backend }: AppProps)
 			)}
 		</main>
 	);
+}
+
+function asError(failure: unknown): Error
+{
+	return failure instanceof Error ? failure : new Error(String(failure));
 }
 
 function describe(status: Status): string

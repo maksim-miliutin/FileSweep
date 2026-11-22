@@ -35,6 +35,13 @@ function hasButton(name: string): boolean
 	return screen.queryByRole("button", { name }) !== null;
 }
 
+function chosenFolders(): (string | null | undefined)[]
+{
+	return within(screen.getByRole("list", { name: "Folders to scan" }))
+		.getAllByRole("listitem")
+		.map(item => item.firstChild?.textContent);
+}
+
 /** The window with the given folders already chosen through the dialog. */
 async function opened(fake: FakeBackend, folders: string[] = [], backend: Backend = fake): Promise<void>
 {
@@ -347,4 +354,47 @@ test("rows that cannot be read are told as a failure", async () =>
 	await pass();
 
 	expect(screen.getByRole("alert").textContent).toContain("groups.total");
+});
+
+test("known folders are offered until they are chosen, and one press adds one", async () =>
+{
+	const fake = new FakeBackend();
+	fake.suggestions = [
+		{ kind: "downloads", path: "/home/me/Downloads" },
+		{ kind: "pictures", path: "/home/me/Pictures" },
+	];
+	await opened(fake);
+
+	fireEvent.click(button("Add Downloads"));
+
+	expect(chosenFolders()).toEqual(["/home/me/Downloads"]);
+	expect([hasButton("Add Downloads"), hasButton("Add Pictures")]).toEqual([false, true]);
+	expect(button("Scan").disabled).toBe(false);
+
+	fireEvent.click(button("Remove /home/me/Downloads"));
+	expect(hasButton("Add Downloads")).toBe(true);
+});
+
+test("a known folder is not added while a scan runs", async () =>
+{
+	const fake = new FakeBackend();
+	fake.suggestions = [{ kind: "pictures", path: "/home/me/Pictures" }];
+	await scanStarted(fake);
+
+	expect(button("Add Pictures").disabled).toBe(true);
+});
+
+test("known folders that cannot be read are reported, and folders can still be added", async () =>
+{
+	const fake = new FakeBackend();
+	const broken = withOverrides(fake, { suggestedRoots: () => Promise.reject(new Error("the shell did not answer")) });
+	await opened(fake, [], broken);
+	expect(screen.getByRole("alert").textContent).toContain("the shell did not answer");
+
+	fake.picks = ["/a"];
+	fireEvent.click(button("Add folder"));
+	await pass();
+
+	expect(chosenFolders()).toEqual(["/a"]);
+	expect(screen.queryByRole("alert")).toBeNull();
 });
