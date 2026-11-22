@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import type { Backend } from "./backend/backend";
 import type { GroupView, SkipView, Status, SuggestedRoot } from "./backend/types";
+import { BackendError } from "./backend/types";
+import { copyText } from "./clipboard";
 import { text } from "./strings";
 import { FIRST_ROWS, isRunning, useRows, useScan } from "./useScan";
 
@@ -21,6 +23,7 @@ export function App({ backend }: AppProps)
 	const [folderError, setFolderError] = useState<Error | null>(null);
 
 	const { state } = scan.status;
+	const scanId = scan.status.scan?.id ?? null;
 	const running = isRunning(state);
 	const error = scan.error ?? folderError ?? rows.error;
 	const offers = suggestions.filter(offer => !folders.includes(offer.path));
@@ -166,11 +169,19 @@ export function App({ backend }: AppProps)
 				{error !== null && <p role="alert">{error.message}</p>}
 			</section>
 
-			{rows.groups !== null && (
+			{rows.groups !== null && scanId !== null && (
 				<section aria-labelledby="groups-heading">
 					<h2 id="groups-heading">{text.groupsHeading}</h2>
 					<ul aria-label={text.groupsList}>
-						{rows.groups.groups.map(group => <Group key={group.id} group={group} />)}
+						{rows.groups.groups.map(group => (
+							// A new scan numbers its groups from zero again; with the scan in the
+							// key, a message under a file of the old scan is not carried over.
+							<Group
+								key={`${String(scanId)}:${String(group.id)}`}
+								group={group}
+								onReveal={async fileId => backend.reveal(scanId, group.id, fileId)}
+							/>
+						))}
 					</ul>
 					{rows.groups.total > FIRST_ROWS && <p>{text.firstGroups(FIRST_ROWS, rows.groups.total)}</p>}
 				</section>
@@ -229,7 +240,7 @@ function describe(status: Status): string
 	}
 }
 
-function Group({ group }: { group: GroupView })
+function Group({ group, onReveal }: { group: GroupView; onReveal: (fileId: number) => Promise<void> })
 {
 	return (
 		<li>
@@ -244,11 +255,63 @@ function Group({ group }: { group: GroupView })
 						{file.path}
 						{file.otherPaths.map(other => <span key={other}>{`, ${text.alsoNamed(other)}`}</span>)}
 						{file.linkedElsewhere && <span>{` (${text.linkedElsewhere})`}</span>}
+						{" "}
+						<FileActions path={file.path} onReveal={async () => onReveal(file.id)} />
 					</li>
 				))}
 			</ul>
 		</li>
 	);
+}
+
+interface Said
+{
+	failed: boolean;
+	words: string;
+}
+
+function FileActions({ path, onReveal }: { path: string; onReveal: () => Promise<void> })
+{
+	const [said, setSaid] = useState<Said | null>(null);
+	const pathId = useId();
+
+	const act = async (action: () => Promise<void>, done: string | null): Promise<void> =>
+	{
+		try
+		{
+			await action();
+			setSaid(done === null ? null : { failed: false, words: done });
+		}
+		catch (failure)
+		{
+			setSaid({ failed: true, words: whatWentWrong(failure) });
+		}
+	};
+
+	return (
+		<>
+			<span id={pathId} hidden>{path}</span>
+			<button type="button" aria-describedby={pathId} onClick={() => void act(onReveal, null)}>
+				{text.showInFolder}
+			</button>
+			{" "}
+			<button type="button" aria-describedby={pathId} onClick={() => void act(async () => copyText(path), text.copied)}>
+				{text.copyPath}
+			</button>
+			{said !== null && <span role={said.failed ? "alert" : "status"}>{` ${said.words}`}</span>}
+		</>
+	);
+}
+
+/** The system's own words come with the code, when it gave any. */
+function whatWentWrong(failure: unknown): string
+{
+	if (failure instanceof BackendError && typeof failure.detail.message === "string")
+	{
+		return `${failure.message}: ${failure.detail.message}`;
+	}
+
+	return failure instanceof Error ? failure.message : String(failure);
 }
 
 function Skipped({ entry }: { entry: SkipView })
