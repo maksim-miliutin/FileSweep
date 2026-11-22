@@ -1,13 +1,20 @@
 // Every sentence the window shows, in one place, so that another language
 // can be put beside this one.
 
-import type { SkipReason } from "./backend/types";
+import type { RootKind, SkipReason } from "./backend/types";
 import { formatBytes, formatCount } from "./format";
 
 function many(count: number, one: string, more: string): string
 {
 	return `${formatCount(count)} ${count === 1 ? one : more}`;
 }
+
+const rootKinds: Record<RootKind, string> = {
+	downloads: "Downloads",
+	desktop: "Desktop",
+	documents: "Documents",
+	pictures: "Pictures",
+};
 
 const reasons: Record<SkipReason, string> = {
 	link: "a link, which is not followed",
@@ -35,6 +42,9 @@ export const text = {
 	removeFolder: (folder: string) => `Remove ${folder}`,
 	remove: "Remove",
 	includeHidden: "Include hidden files",
+	suggested: "Suggested:",
+	rootKinds,
+	addSuggested: (folder: string) => `Add ${folder}`,
 	scan: "Scan",
 
 	scanHeading: "Scan",
