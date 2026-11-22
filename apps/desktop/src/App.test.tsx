@@ -398,3 +398,90 @@ test("known folders that cannot be read are reported, and folders can still be a
 	expect(chosenFolders()).toEqual(["/a"]);
 	expect(screen.queryByRole("alert")).toBeNull();
 });
+
+function fileOf(place: number): HTMLElement
+{
+	const group = within(screen.getByRole("list", { name: "Groups of identical files" }))
+		.getAllByRole("listitem")
+		.find(item => item.parentElement?.getAttribute("aria-label") === "Groups of identical files");
+	const file = group === undefined ? undefined : within(group).getAllByRole("listitem")[place];
+	if (file === undefined)
+	{
+		throw new Error(`the first group has no file ${String(place)}`);
+	}
+
+	return file;
+}
+
+async function finishedWithOneGroup(fake: FakeBackend): Promise<void>
+{
+	await scanStarted(fake);
+	fake.find(sampleGroup(1024, 1024));
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+}
+
+test("Show in folder names the file by its ids", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	fake.find(sampleGroup(1024, 1024));
+	// Found second but frees more, so it is listed first: its id is 1, not its place.
+	fake.find(sampleGroup(2048, 4096));
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	fireEvent.click(within(fileOf(1)).getByRole("button", { name: "Show in folder" }));
+	await pass();
+
+	expect(fake.revealed).toEqual([{ scanId: 1, groupId: 1, fileId: 1 }]);
+});
+
+test("a file that cannot be shown says why next to it, and the other buttons go on working", async () =>
+{
+	const fake = new FakeBackend();
+	await finishedWithOneGroup(fake);
+
+	fake.failNext(new BackendError("revealFailed", "the file could not be shown in its folder", { message: "path doesn't exist" }));
+	fireEvent.click(within(fileOf(0)).getByRole("button", { name: "Show in folder" }));
+	await pass();
+	expect(within(fileOf(0)).getByRole("alert").textContent).toContain("path doesn't exist");
+
+	fireEvent.click(within(fileOf(1)).getByRole("button", { name: "Show in folder" }));
+	await pass();
+	expect(fake.revealed).toEqual([{ scanId: 1, groupId: 0, fileId: 1 }]);
+});
+
+test("Copy path puts the whole path on the clipboard", async () =>
+{
+	const writeText = vi.fn(() => Promise.resolve());
+	Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+	try
+	{
+		const fake = new FakeBackend();
+		await finishedWithOneGroup(fake);
+
+		fireEvent.click(within(fileOf(1)).getByRole("button", { name: "Copy path" }));
+		await pass();
+
+		expect(writeText).toHaveBeenCalledWith("/sample/1024/two.bin");
+		expect(within(fileOf(1)).getByRole("status").textContent).toContain("Path copied");
+	}
+	finally
+	{
+		Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+	}
+});
+
+test("a clipboard the window cannot use is reported next to the button", async () =>
+{
+	const fake = new FakeBackend();
+	await finishedWithOneGroup(fake);
+
+	fireEvent.click(within(fileOf(0)).getByRole("button", { name: "Copy path" }));
+	await pass();
+
+	expect(within(fileOf(0)).getByRole("alert").textContent).toContain("clipboard");
+});

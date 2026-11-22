@@ -71,6 +71,9 @@ export const text = {
 	unverified: "These may be one file on disk under several names, so no space is promised.",
 	alsoNamed: (path: string) => `also named ${path}`,
 	linkedElsewhere: "has more names outside the scanned folders",
+	showInFolder: "Show in folder",
+	copyPath: "Copy path",
+	copied: "Path copied",
 	firstGroups: (shown: number, total: number) =>
 		`Showing the first ${formatCount(shown)} of ${many(total, "group", "groups")}.`,
 
