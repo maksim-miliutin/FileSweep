@@ -16,6 +16,22 @@ const rootKinds: Record<RootKind, string> = {
 	pictures: "Pictures",
 };
 
+/** Short names for the counts by reason, inside a sentence. */
+const reasonNames: Record<SkipReason, string> = {
+	link: "links",
+	onlineOnly: "online only",
+	system: "system files",
+	hidden: "hidden",
+	special: "not ordinary files",
+	notADirectory: "not folders",
+	alreadyCovered: "already scanned",
+	accessDenied: "access denied",
+	inUse: "in use",
+	vanished: "gone before reading",
+	changed: "changed while reading",
+	io: "read errors",
+};
+
 const reasons: Record<SkipReason, string> = {
 	link: "a link, which is not followed",
 	onlineOnly: "kept online only, and not downloaded",
@@ -74,13 +90,18 @@ export const text = {
 	showInFolder: "Show in folder",
 	copyPath: "Copy path",
 	copied: "Path copied",
-	firstGroups: (shown: number, total: number) =>
-		`Showing the first ${formatCount(shown)} of ${many(total, "group", "groups")}.`,
+	groupsShown: (first: number, last: number, total: number) =>
+		`Groups ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`,
+	previousPage: "Previous page",
+	nextPage: "Next page",
 
 	skippedHeading: "Skipped",
 	skippedList: "Skipped entries",
-	firstSkipped: (shown: number, total: number) =>
-		`Showing the first ${formatCount(shown)} of ${many(total, "entry", "entries")}.`,
+	entriesShown: (first: number, last: number, total: number) =>
+		`Entries ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`,
+	reasonNames,
+	couldNotRead: (counts: string) => `Could not be read: ${counts}.`,
+	leftOutByRule: (counts: string) => `Left out by rule: ${counts}.`,
 	reason: (reason: SkipReason, detail: string | null) =>
 		detail === null ? reasons[reason] : `${reasons[reason]}: ${detail}`,
 };

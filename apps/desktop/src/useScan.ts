@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Backend, StartOptions } from "./backend/backend";
-import type { GroupPage, ScanState, SkipPage, Status } from "./backend/types";
+import type { GroupPage, GroupSort, ScanState, SkipPage, Status } from "./backend/types";
 import { BackendError } from "./backend/types";
 
 export const POLL_MS = 200;
-export const FIRST_ROWS = 50;
+/** Rows on one page of groups or of skipped entries. */
+export const PAGE_ROWS = 50;
 
 const IDLE: Status = { state: "idle", scan: null };
 
@@ -133,7 +134,7 @@ export function useScan(backend: Backend): ScanHandle
 
 export interface Rows
 {
-	/** The first groups of the scan, or null while it has none. */
+	/** The page of groups asked for, or null while the scan has none. */
 	groups: GroupPage | null;
 	skipped: SkipPage | null;
 	error: Error | null;
@@ -146,10 +147,16 @@ interface Kept<Page>
 }
 
 /**
- * While the scan runs, groups come in the order they are found, so rows do
- * not jump around; afterwards the most reclaimable come first.
+ * While a scan runs its groups come in the order they were found, so rows
+ * do not move; afterwards the most reclaimable come first.
  */
-export function useRows(backend: Backend, status: Status): Rows
+export function groupOrder(state: ScanState): GroupSort
+{
+	return isRunning(state) ? "found" : "savings";
+}
+
+/** `groupPage` and `skipPage` count from zero. */
+export function useRows(backend: Backend, status: Status, groupPage: number, skipPage: number): Rows
 {
 	const [groups, setGroups] = useState<Kept<GroupPage> | null>(null);
 	const [skipped, setSkipped] = useState<Kept<SkipPage> | null>(null);
@@ -158,7 +165,7 @@ export function useRows(backend: Backend, status: Status): Rows
 	const scanId = status.scan?.id ?? null;
 	const groupCount = status.scan?.groups ?? 0;
 	const skipCount = status.scan?.skipped ?? 0;
-	const sort = isRunning(status.state) ? "found" : "savings";
+	const sort = groupOrder(status.state);
 
 	// A page asked for an earlier scan can be refused as stale when a new
 	// scan has started in between. That is a race the next status settles,
@@ -179,7 +186,7 @@ export function useRows(backend: Backend, status: Status): Rows
 		}
 
 		let outdated = false;
-		backend.groups(scanId, { offset: 0, limit: FIRST_ROWS, sort }).then((page) =>
+		backend.groups(scanId, { offset: groupPage * PAGE_ROWS, limit: PAGE_ROWS, sort }).then((page) =>
 		{
 			if (!outdated)
 			{
@@ -192,7 +199,7 @@ export function useRows(backend: Backend, status: Status): Rows
 		{
 			outdated = true;
 		};
-	}, [backend, groupCount, report, scanId, sort]);
+	}, [backend, groupCount, groupPage, report, scanId, sort]);
 
 	useEffect(() =>
 	{
@@ -202,7 +209,7 @@ export function useRows(backend: Backend, status: Status): Rows
 		}
 
 		let outdated = false;
-		backend.skipped(scanId, { offset: 0, limit: FIRST_ROWS }).then((page) =>
+		backend.skipped(scanId, { offset: skipPage * PAGE_ROWS, limit: PAGE_ROWS }).then((page) =>
 		{
 			if (!outdated)
 			{
@@ -215,7 +222,7 @@ export function useRows(backend: Backend, status: Status): Rows
 		{
 			outdated = true;
 		};
-	}, [backend, report, scanId, skipCount]);
+	}, [backend, report, scanId, skipCount, skipPage]);
 
 	// Rows kept from an earlier scan are never shown for the current one.
 	return {
