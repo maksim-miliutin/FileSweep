@@ -17,7 +17,10 @@ interface AppProps
 export function App({ backend }: AppProps)
 {
 	const scan = useScan(backend);
-	const [folders, setFolders] = useState<string[]>([]);
+	// Null until the list is changed in this window. Until then the folders of
+	// the scan the session holds stand in, so a window reloaded under a scan
+	// still shows what it scans, and can scan the same folders again.
+	const [chosen, setChosen] = useState<string[] | null>(null);
 	// A page is only good for the list it was turned in: another scan or
 	// another order starts again from the first page.
 	const [groupPage, setGroupPage] = useState<{ list: string; page: number } | null>(null);
@@ -29,6 +32,8 @@ export function App({ backend }: AppProps)
 	const { state } = scan.status;
 	const scanId = scan.status.scan?.id ?? null;
 	const running = isRunning(state);
+	const scanned = scan.status.scan?.roots ?? [];
+	const folders = chosen ?? scanned;
 	const groupList = `${String(scanId)}:${groupOrder(state)}`;
 	const skipList = String(scanId);
 	const groupsAt = groupPage?.list === groupList ? groupPage.page : 0;
@@ -65,7 +70,12 @@ export function App({ backend }: AppProps)
 
 	const add = (picked: readonly string[]): void =>
 	{
-		setFolders(chosen => [...chosen, ...picked.filter(folder => !chosen.includes(folder))]);
+		setChosen((previous) =>
+		{
+			const list = previous ?? scanned;
+
+			return [...list, ...picked.filter(folder => !list.includes(folder))];
+		});
 	};
 
 	const addFolders = async (): Promise<void> =>
@@ -101,7 +111,7 @@ export function App({ backend }: AppProps)
 											disabled={running}
 											onClick={() =>
 											{
-												setFolders(chosen => chosen.filter(other => other !== folder));
+												setChosen(previous => (previous ?? scanned).filter(other => other !== folder));
 											}}
 										>
 											{text.remove}
