@@ -95,6 +95,39 @@ test("folders come from the dialog, once each, and can be taken off the list", a
 	expect(screen.getByText("/home/me/Music")).toBeTruthy();
 });
 
+test("a window opened under a scan shows the folders it scans, ready to scan again", async () =>
+{
+	const fake = new FakeBackend();
+	await fake.start(["/home/me/Downloads", "/home/me/Pictures"], { includeHidden: false });
+	await opened(fake);
+
+	expect(chosenFolders()).toEqual(["/home/me/Downloads", "/home/me/Pictures"]);
+
+	fake.end("completed");
+	await pass(POLL_MS);
+	fireEvent.click(button("Scan"));
+	await pass();
+
+	const status = await fake.status();
+	expect(status.scan?.id).toBe(2);
+	expect(status.scan?.roots).toEqual(["/home/me/Downloads", "/home/me/Pictures"]);
+});
+
+test("folders taken off the list are not put back from the last scan", async () =>
+{
+	const fake = new FakeBackend();
+	await fake.start(["/a", "/b"], { includeHidden: false });
+	fake.end("completed");
+	await opened(fake);
+
+	fireEvent.click(button("Remove /a"));
+	fireEvent.click(button("Remove /b"));
+	await pass();
+
+	expect(screen.getByText("No folder chosen yet.")).toBeTruthy();
+	expect(button("Scan").disabled).toBe(true);
+});
+
 test("a dialog the user closes without choosing changes nothing", async () =>
 {
 	const fake = new FakeBackend();
