@@ -252,23 +252,6 @@ test("skipped entries are listed with the reason for each", async () =>
 	expect(skipped[1]?.textContent).toContain("the device is not ready");
 });
 
-test("only the first rows are shown, and the page says how many there are", async () =>
-{
-	const fake = new FakeBackend();
-	await scanStarted(fake);
-	for (let size = 60; size > 0; size -= 1)
-	{
-		fake.find(sampleGroup(size, size));
-	}
-	fake.end("completed");
-	await pass(POLL_MS);
-	await pass();
-
-	const groups = screen.getByRole("list", { name: "Groups of identical files" });
-	expect(groups.children).toHaveLength(50);
-	expect(screen.getByText("Showing the first 50 of 60 groups.")).toBeTruthy();
-});
-
 test("a failed scan says what went wrong", async () =>
 {
 	const fake = new FakeBackend();
@@ -484,4 +467,137 @@ test("a clipboard the window cannot use is reported next to the button", async (
 	await pass();
 
 	expect(within(fileOf(0)).getByRole("alert").textContent).toContain("clipboard");
+});
+
+function region(name: string): HTMLElement
+{
+	return screen.getByRole("region", { name });
+}
+
+function rowsIn(list: string): HTMLElement[]
+{
+	return within(screen.getByRole("list", { name: list })).getAllByRole("listitem")
+		.filter(item => item.parentElement?.getAttribute("aria-label") === list);
+}
+
+function turn(where: string, name: "Previous page" | "Next page"): HTMLButtonElement
+{
+	return within(region(where)).getByRole<HTMLButtonElement>("button", { name });
+}
+
+test("the groups come in pages of 50, and the pages can be turned", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let size = 60; size > 0; size -= 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	expect(rowsIn("Groups of identical files")).toHaveLength(50);
+	expect(region("Duplicates").textContent).toContain("Groups 1–50 of 60");
+	expect([turn("Duplicates", "Previous page").disabled, turn("Duplicates", "Next page").disabled]).toEqual([true, false]);
+
+	fireEvent.click(turn("Duplicates", "Next page"));
+	await pass();
+	expect(rowsIn("Groups of identical files")).toHaveLength(10);
+	expect(region("Duplicates").textContent).toContain("Groups 51–60 of 60");
+	expect(turn("Duplicates", "Next page").disabled).toBe(true);
+
+	fireEvent.click(turn("Duplicates", "Previous page"));
+	await pass();
+	expect(rowsIn("Groups of identical files")).toHaveLength(50);
+});
+
+test("when the scan ends the list starts again from its first page", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let size = 1; size <= 60; size += 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	await pass(POLL_MS);
+	await pass();
+	fireEvent.click(turn("Duplicates", "Next page"));
+	await pass();
+	expect(region("Duplicates").textContent).toContain("Groups 51–60 of 60");
+
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	expect(region("Duplicates").textContent).toContain("Groups 1–50 of 60");
+	expect(rowsIn("Groups of identical files")[0]?.textContent).toContain("60 bytes can be freed");
+});
+
+test("the page shown is refreshed while the scan finds more", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let size = 1; size <= 30; size += 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	await pass(POLL_MS);
+	await pass();
+	expect(region("Duplicates").textContent).toContain("Groups 1–30 of 30");
+
+	for (let size = 31; size <= 60; size += 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	await pass(POLL_MS);
+	await pass();
+
+	expect(rowsIn("Groups of identical files")).toHaveLength(50);
+	expect(region("Duplicates").textContent).toContain("Groups 1–50 of 60");
+});
+
+test("the skipped entries come in pages too, and are counted by reason", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let place = 0; place < 55; place += 1)
+	{
+		fake.skip({ path: `/a/${String(place)}.lock`, reason: "inUse", detail: null });
+	}
+	for (const name of [".one", ".two", ".three"])
+	{
+		fake.skip({ path: `/a/${name}`, reason: "hidden", detail: null });
+	}
+	fake.skip({ path: "/a/broken", reason: "io", detail: "the device is not ready" });
+	fake.skip({ path: "/a/bad", reason: "io", detail: "the device is not ready" });
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	expect(region("Skipped").textContent).toContain("Could not be read: in use 55, read errors 2.");
+	expect(region("Skipped").textContent).toContain("Left out by rule: hidden 3.");
+	const told = region("Skipped").textContent;
+	expect(told.indexOf("Could not be read")).toBeLessThan(told.indexOf("Left out by rule"));
+	expect(region("Skipped").textContent).toContain("Entries 1–50 of 60");
+
+	fireEvent.click(turn("Skipped", "Next page"));
+	await pass();
+	expect(rowsIn("Skipped entries")).toHaveLength(10);
+	expect(region("Skipped").textContent).toContain("Entries 51–60 of 60");
+});
+
+test("a list of exactly one full page has no next page", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let size = 1; size <= 50; size += 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	expect(turn("Duplicates", "Next page").disabled).toBe(true);
 });

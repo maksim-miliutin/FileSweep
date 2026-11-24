@@ -1,11 +1,12 @@
 import { useEffect, useId, useState } from "react";
 
 import type { Backend } from "./backend/backend";
-import type { GroupView, SkipView, Status, SuggestedRoot } from "./backend/types";
+import type { GroupView, SkipReason, SkipView, Status, SuggestedRoot } from "./backend/types";
 import { BackendError } from "./backend/types";
 import { copyText } from "./clipboard";
+import { formatCount } from "./format";
 import { text } from "./strings";
-import { FIRST_ROWS, isRunning, useRows, useScan } from "./useScan";
+import { groupOrder, isRunning, PAGE_ROWS, useRows, useScan } from "./useScan";
 
 interface AppProps
 {
@@ -16,8 +17,11 @@ interface AppProps
 export function App({ backend }: AppProps)
 {
 	const scan = useScan(backend);
-	const rows = useRows(backend, scan.status);
 	const [folders, setFolders] = useState<string[]>([]);
+	// A page is only good for the list it was turned in: another scan or
+	// another order starts again from the first page.
+	const [groupPage, setGroupPage] = useState<{ list: string; page: number } | null>(null);
+	const [skipPage, setSkipPage] = useState<{ list: string; page: number } | null>(null);
 	const [includeHidden, setIncludeHidden] = useState(false);
 	const [suggestions, setSuggestions] = useState<SuggestedRoot[]>([]);
 	const [folderError, setFolderError] = useState<Error | null>(null);
@@ -25,6 +29,11 @@ export function App({ backend }: AppProps)
 	const { state } = scan.status;
 	const scanId = scan.status.scan?.id ?? null;
 	const running = isRunning(state);
+	const groupList = `${String(scanId)}:${groupOrder(state)}`;
+	const skipList = String(scanId);
+	const groupsAt = groupPage?.list === groupList ? groupPage.page : 0;
+	const skippedAt = skipPage?.list === skipList ? skipPage.page : 0;
+	const rows = useRows(backend, scan.status, groupsAt, skippedAt);
 	const error = scan.error ?? folderError ?? rows.error;
 	const offers = suggestions.filter(offer => !folders.includes(offer.path));
 
@@ -183,20 +192,37 @@ export function App({ backend }: AppProps)
 							/>
 						))}
 					</ul>
-					{rows.groups.total > FIRST_ROWS && <p>{text.firstGroups(FIRST_ROWS, rows.groups.total)}</p>}
+					<Pager
+						told={text.groupsShown(rows.groups.offset + 1, rows.groups.offset + rows.groups.groups.length, rows.groups.total)}
+						page={groupsAt}
+						total={rows.groups.total}
+						onTurn={(page) =>
+						{
+							setGroupPage({ list: groupList, page });
+						}}
+					/>
 				</section>
 			)}
 
 			{rows.skipped !== null && (
 				<section aria-labelledby="skipped-heading">
 					<h2 id="skipped-heading">{text.skippedHeading}</h2>
+					{scan.status.scan !== null && <ReasonCounts counts={scan.status.scan.skippedByReason} />}
 					<ul aria-label={text.skippedList}>
 						{rows.skipped.items.map((entry, place) => (
 							// One path can be skipped twice, so it cannot be the key alone.
 							<Skipped key={`${String(place)}:${entry.path}`} entry={entry} />
 						))}
 					</ul>
-					{rows.skipped.total > FIRST_ROWS && <p>{text.firstSkipped(FIRST_ROWS, rows.skipped.total)}</p>}
+					<Pager
+						told={text.entriesShown(rows.skipped.offset + 1, rows.skipped.offset + rows.skipped.items.length, rows.skipped.total)}
+						page={skippedAt}
+						total={rows.skipped.total}
+						onTurn={(page) =>
+						{
+							setSkipPage({ list: skipList, page });
+						}}
+					/>
 				</section>
 			)}
 		</main>
@@ -261,6 +287,59 @@ function Group({ group, onReveal }: { group: GroupView; onReveal: (fileId: numbe
 				))}
 			</ul>
 		</li>
+	);
+}
+
+function Pager({ told, page, total, onTurn }: { told: string; page: number; total: number; onTurn: (page: number) => void })
+{
+	return (
+		<p>
+			{told}
+			{" "}
+			<button
+				type="button"
+				disabled={page === 0}
+				onClick={() =>
+				{
+					onTurn(page - 1);
+				}}
+			>
+				{text.previousPage}
+			</button>
+			{" "}
+			<button
+				type="button"
+				disabled={(page + 1) * PAGE_ROWS >= total}
+				onClick={() =>
+				{
+					onTurn(page + 1);
+				}}
+			>
+				{text.nextPage}
+			</button>
+		</p>
+	);
+}
+
+/** What the scan tried to read and could not, before what it left out on purpose. */
+const UNREAD: readonly SkipReason[] = ["accessDenied", "inUse", "vanished", "changed", "io"];
+const BY_RULE: readonly SkipReason[] = ["link", "onlineOnly", "system", "hidden", "special", "notADirectory", "alreadyCovered"];
+
+function ReasonCounts({ counts }: { counts: Partial<Record<SkipReason, number>> })
+{
+	const told = (reasons: readonly SkipReason[]): string =>
+		reasons
+			.filter(reason => (counts[reason] ?? 0) > 0)
+			.map(reason => `${text.reasonNames[reason]} ${formatCount(counts[reason] ?? 0)}`)
+			.join(", ");
+	const unread = told(UNREAD);
+	const byRule = told(BY_RULE);
+
+	return (
+		<>
+			{unread !== "" && <p>{text.couldNotRead(unread)}</p>}
+			{byRule !== "" && <p>{text.leftOutByRule(byRule)}</p>}
+		</>
 	);
 }
 
