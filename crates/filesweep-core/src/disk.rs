@@ -6,9 +6,10 @@ use std::ffi::OsStr;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::platform::EntryFlags;
-use crate::types::{FileIdentity, FileStamp};
+use crate::types::{FileIdentity, FileStamp, FileTimes};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
@@ -24,6 +25,7 @@ pub(crate) struct EntryInfo {
     /// Bytes, as the listing reports them. May lag behind the file itself.
     pub len: u64,
     pub flags: EntryFlags,
+    pub times: FileTimes,
 }
 
 #[derive(Debug)]
@@ -87,6 +89,7 @@ impl Disk for StdDisk {
             kind: kind_of(&meta),
             len: meta.len(),
             flags: EntryFlags::default(),
+            times: times_of(&meta),
         })
     }
 
@@ -124,7 +127,22 @@ fn entry_info(meta: &Metadata, name: &OsStr) -> EntryInfo {
         kind: kind_of(meta),
         len: meta.len(),
         flags: flags_of(meta, name),
+        times: times_of(meta),
     }
+}
+
+fn times_of(meta: &Metadata) -> FileTimes {
+    FileTimes {
+        modified: real_time(meta.modified()),
+        accessed: real_time(meta.accessed()),
+        created: real_time(meta.created()),
+    }
+}
+
+// A time at or before 1970 stands for no time at all: Windows reads a zero
+// FILETIME as 1601, and build tools stamp the files they make with zero.
+fn real_time(time: io::Result<SystemTime>) -> Option<SystemTime> {
+    time.ok().filter(|time| *time > SystemTime::UNIX_EPOCH)
 }
 
 fn kind_of(meta: &Metadata) -> EntryKind {
@@ -209,6 +227,7 @@ fn dir_identity_of(dir: &Path) -> Option<FileIdentity> {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use std::fs;
+    use std::time::Duration;
 
     use super::*;
 
@@ -242,6 +261,42 @@ mod tests {
 
         let five = dir.path().join("five.bin");
         assert!(listed.iter().any(|entry| entry.path == five));
+    }
+
+    #[test]
+    fn std_disk_reports_the_times_a_file_carries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.txt");
+        fs::write(&path, b"old").unwrap();
+        // 1 January 2020 and 1 June 2021, whole seconds, so every file
+        // system keeps them exactly.
+        let modified = SystemTime::UNIX_EPOCH + Duration::from_secs(1_577_836_800);
+        let accessed = SystemTime::UNIX_EPOCH + Duration::from_secs(1_622_505_600);
+        let file = fs::File::options().write(true).open(&path).unwrap();
+        file.set_times(
+            fs::FileTimes::new()
+                .set_modified(modified)
+                .set_accessed(accessed),
+        )
+        .unwrap();
+        drop(file);
+
+        let listed = StdDisk.list_dir(dir.path()).unwrap();
+        let times = info_of(&listed, "old.txt").times;
+
+        assert_eq!(times.modified, Some(modified));
+        assert_eq!(times.accessed, Some(accessed));
+    }
+
+    #[test]
+    fn a_time_at_or_before_1970_is_no_time() {
+        let epoch = SystemTime::UNIX_EPOCH;
+        let second = Duration::from_secs(1);
+
+        assert_eq!(real_time(Ok(epoch)), None);
+        assert_eq!(real_time(Ok(epoch - second)), None);
+        assert_eq!(real_time(Err(io::Error::other("no such time"))), None);
+        assert_eq!(real_time(Ok(epoch + second)), Some(epoch + second));
     }
 
     #[test]

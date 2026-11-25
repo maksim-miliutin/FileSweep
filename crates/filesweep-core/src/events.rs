@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::types::{DuplicateGroup, Progress, ScanEvent, Skip, SkipReason};
+use crate::types::{DuplicateGroup, IndexedFile, Progress, ScanEvent, Skip, SkipReason};
 
 pub(crate) struct Events<'a> {
     sink: &'a mut dyn FnMut(ScanEvent),
@@ -25,6 +25,10 @@ impl<'a> Events<'a> {
 
     pub(crate) fn group(&mut self, group: DuplicateGroup) {
         (self.sink)(ScanEvent::Group(group));
+    }
+
+    pub(crate) fn indexed(&mut self, file: IndexedFile) {
+        (self.sink)(ScanEvent::Indexed(file));
     }
 
     pub(crate) fn skipped(&self) -> u64 {

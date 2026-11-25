@@ -277,6 +277,8 @@ impl Scan {
             }
             ScanEvent::Skipped(skip) => self.results.take_skip(skip),
             ScanEvent::Group(group) => self.results.take_group(group),
+            // Not kept yet: no question the session answers needs every file.
+            ScanEvent::Indexed(_) => {}
         }
     }
 

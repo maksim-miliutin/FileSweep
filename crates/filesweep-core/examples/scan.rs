@@ -40,6 +40,8 @@ fn main() -> ExitCode {
             );
         }
         ScanEvent::Group(group) => print_group(&group),
+        // The example prints copies only, not every file it walks past.
+        ScanEvent::Indexed(_) => {}
     });
 
     match result {
