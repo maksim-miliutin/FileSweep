@@ -23,7 +23,7 @@ mod walk;
 pub use control::ScanControl;
 pub use scan::scan;
 pub use types::{
-    ContentHash, DuplicateFile, DuplicateGroup, FileIdentity, FileStamp, Independence, IoFailure,
-    Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
-    SkipReason,
+    ContentHash, DuplicateFile, DuplicateGroup, FileIdentity, FileStamp, FileTimes, Independence,
+    IndexedFile, IoFailure, Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanRequest,
+    ScanSummary, Skip, SkipReason,
 };

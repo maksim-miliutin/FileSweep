@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use filesweep_core::{
-    DuplicateGroup, Progress, ScanControl, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
-    scan,
+    DuplicateGroup, IndexedFile, Progress, ScanControl, ScanEvent, ScanPolicy, ScanRequest,
+    ScanSummary, Skip, scan,
 };
 
 pub struct Tree {
@@ -103,6 +103,7 @@ pub struct Run {
     pub groups: Vec<DuplicateGroup>,
     pub skipped: Vec<Skip>,
     pub progress: Vec<Progress>,
+    pub indexed: Vec<IndexedFile>,
     pub summary: ScanSummary,
 }
 
@@ -118,11 +119,13 @@ pub fn run_with(control: &ScanControl, roots: &[&Path], policy: ScanPolicy) -> R
     let mut groups = Vec::new();
     let mut skipped = Vec::new();
     let mut progress = Vec::new();
+    let mut indexed = Vec::new();
 
     let summary = scan(&request, control, &mut |event| match event {
         ScanEvent::Group(group) => groups.push(group),
         ScanEvent::Skipped(skip) => skipped.push(skip),
         ScanEvent::Progress(step) => progress.push(step),
+        ScanEvent::Indexed(file) => indexed.push(file),
     })
     .expect("the request names at least one root");
 
@@ -130,6 +133,7 @@ pub fn run_with(control: &ScanControl, roots: &[&Path], policy: ScanPolicy) -> R
         groups,
         skipped,
         progress,
+        indexed,
         summary,
     }
 }

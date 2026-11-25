@@ -7,7 +7,7 @@ use crate::control::{Flow, ScanControl};
 use crate::disk::{Disk, EntryInfo, EntryKind, Listed};
 use crate::events::Events;
 use crate::platform::skip_reason;
-use crate::types::{FileIdentity, Progress, ScanPolicy, ScanRequest, SkipReason};
+use crate::types::{FileIdentity, IndexedFile, Progress, ScanPolicy, ScanRequest, SkipReason};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Indexed {
@@ -152,10 +152,17 @@ impl Walker<'_, '_> {
             Verdict::Skip(reason) => self.events.skip(path, reason),
             Verdict::Enter => self.enter(path),
             Verdict::Empty => self.walked.empty_files += 1,
-            Verdict::Index => self.walked.index.push(Indexed {
-                path,
-                size: info.len,
-            }),
+            Verdict::Index => {
+                self.events.indexed(IndexedFile {
+                    path: path.clone(),
+                    size: info.len,
+                    times: info.times,
+                });
+                self.walked.index.push(Indexed {
+                    path,
+                    size: info.len,
+                });
+            }
         }
     }
 

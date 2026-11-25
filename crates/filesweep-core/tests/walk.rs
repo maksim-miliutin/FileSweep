@@ -155,3 +155,27 @@ fn a_name_that_is_not_utf8_is_still_walked() {
     assert_eq!(seen.summary.files_seen, 1);
     assert!(seen.skipped.is_empty(), "skipped: {:?}", seen.skipped);
 }
+
+#[test]
+fn every_indexed_file_is_reported_once_with_its_listing() {
+    let tree = Tree::new();
+    let first = tree.file("a.txt", b"aaa");
+    tree.file("empty.txt", b"");
+    let second = tree.file("sub/b.txt", b"bb");
+
+    let seen = run(&[tree.root()], ScanPolicy::default());
+
+    let reported: Vec<_> = seen
+        .indexed
+        .iter()
+        .map(|file| (file.path.clone(), file.size))
+        .collect();
+    assert_eq!(reported, vec![(first, 3), (second, 2)]);
+    assert_eq!(seen.summary.files_seen, 2);
+    // Every platform keeps the time of the last change.
+    assert!(
+        seen.indexed
+            .iter()
+            .all(|file| file.times.modified.is_some())
+    );
+}

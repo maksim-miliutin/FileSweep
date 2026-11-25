@@ -329,6 +329,9 @@ pub(crate) fn collect_with(
             ScanEvent::Group(group) => groups.push(group),
             ScanEvent::Skipped(skip) => skipped.push(skip),
             ScanEvent::Progress(step) => progress.push(step),
+            // The faults these tests stage are about copies; the public
+            // tests check what the walk reports of every file.
+            ScanEvent::Indexed(_) => {}
         },
         disk,
     )

@@ -24,6 +24,9 @@ pub enum ScanEvent {
     Progress(Progress),
     Skipped(Skip),
     Group(DuplicateGroup),
+    /// Once for every file the walk puts into the index, before any hashing.
+    /// Empty and skipped files are not sent.
+    Indexed(IndexedFile),
 }
 
 /// Counters never go down. Each phase reports when it starts and when it
@@ -42,6 +45,30 @@ pub enum Progress {
         bytes_done: u64,
         bytes_total: u64,
     },
+}
+
+/// A regular file as the listing of its folder describes it. Nothing about it
+/// was read from the file itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedFile {
+    pub path: PathBuf,
+    /// Bytes, from the listing.
+    pub size: u64,
+    pub times: FileTimes,
+}
+
+/// When a file was last changed, last opened and made, as the listing reports
+/// it. `None`: the file system gives no such time.
+///
+/// Good enough to sort by, not to act on. On Windows the listing gives the
+/// copy NTFS keeps in the folder entry, which can lag behind the file, most of
+/// all for a file with more than one name, and Windows often does not record
+/// opening at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FileTimes {
+    pub modified: Option<SystemTime>,
+    pub accessed: Option<SystemTime>,
+    pub created: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
