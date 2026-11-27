@@ -1,0 +1,9 @@
+{
+  "edgesMs": [1577836800000, 1609459200000],
+  "spans": [
+    { "files": 12, "bytes": 3145728 },
+    { "files": 3, "bytes": 1048576 },
+    { "files": 40, "bytes": 52428800 }
+  ],
+  "undated": { "files": 1, "bytes": 512 }
+}

@@ -1,5 +1,8 @@
 {
   "groupsBySavings": { "offset": 0, "limit": 50, "sort": "savings" },
   "groupsAsFound": { "offset": 100, "limit": 50, "sort": "found" },
-  "skipped": { "offset": 0, "limit": 200 }
+  "skipped": { "offset": 0, "limit": 200 },
+  "history": { "edgesMs": [1577836800000, 1609459200000] },
+  "usedBefore": { "beforeMs": 1609459200000, "offset": 0, "limit": 50 },
+  "usedBetween": { "fromMs": 1577836800000, "beforeMs": 1609459200000, "offset": 50, "limit": 50 }
 }

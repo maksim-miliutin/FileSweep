@@ -3,14 +3,17 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::Path;
 
-use filesweep_core::{DuplicateGroup, Skip};
+use filesweep_core::{DuplicateGroup, IndexedFile, Skip};
 
 use crate::view::{
-    GroupPage, GroupQuery, GroupSort, GroupView, MAX_PAGE, PageQuery, SkipCode, SkipPage, SkipView,
+    GroupPage, GroupQuery, GroupSort, GroupView, HistoryQuery, MAX_EDGES, MAX_PAGE, PageQuery,
+    SkipCode, SkipPage, SkipView, UsageFileView, UsageHistory, UsagePage, UsageQuery, UsageSpan,
+    unix_millis,
 };
 
-/// Groups and skipped entries in the order the scanner reported them. Both
-/// lists only grow, so a place in either stays valid for the whole scan.
+/// Groups, skipped entries and indexed files in the order the scanner
+/// reported them. The lists only grow, so a place in any of them stays valid
+/// for the whole scan.
 #[derive(Default)]
 pub(crate) struct Results {
     groups: Vec<DuplicateGroup>,
@@ -21,6 +24,15 @@ pub(crate) struct Results {
     /// that order is asked for, and out of date whenever it is shorter than
     /// `groups`: groups are only ever added.
     by_savings: Vec<usize>,
+    files: Vec<Kept>,
+    /// Places in `files`, the largest first, kept the way `by_savings` is.
+    by_size: Vec<usize>,
+}
+
+struct Kept {
+    file: IndexedFile,
+    /// Milliseconds since 1970. `None` when the file system gave no time.
+    last_used: Option<i64>,
 }
 
 impl Results {
@@ -29,6 +41,17 @@ impl Results {
             .reclaimable_bytes
             .saturating_add(group.reclaimable_bytes);
         self.groups.push(group);
+    }
+
+    pub(crate) fn take_file(&mut self, file: IndexedFile) {
+        let times = file.times;
+        let last_used = [times.modified, times.accessed, times.created]
+            .into_iter()
+            .flatten()
+            .max()
+            .map(unix_millis);
+
+        self.files.push(Kept { file, last_used });
     }
 
     pub(crate) fn take_skip(&mut self, skip: Skip) {
@@ -85,6 +108,71 @@ impl Results {
         }
     }
 
+    pub(crate) fn history(&self, query: &HistoryQuery) -> UsageHistory {
+        let mut edges = query.edges_ms.clone();
+        edges.sort_unstable();
+        edges.dedup();
+        edges.truncate(MAX_EDGES);
+
+        let mut spans = vec![UsageSpan::default(); edges.len() + 1];
+        let mut undated = UsageSpan::default();
+        for kept in &self.files {
+            let span = match kept.last_used {
+                // As many edges lie at or before the time as spans before
+                // the one it falls in.
+                Some(time) => &mut spans[edges.partition_point(|&edge| edge <= time)],
+                None => &mut undated,
+            };
+            span.files += 1;
+            span.bytes = span.bytes.saturating_add(kept.file.size);
+        }
+
+        UsageHistory {
+            edges_ms: edges,
+            spans,
+            undated,
+        }
+    }
+
+    pub(crate) fn usage_page(&mut self, query: &UsageQuery) -> UsagePage {
+        self.order_by_size();
+
+        let in_span = |time: i64| {
+            query.from_ms.is_none_or(|from| time >= from)
+                && query.before_ms.is_none_or(|before| time < before)
+        };
+        let rows = query.limit.min(MAX_PAGE) as usize;
+        let mut total = 0;
+        let mut bytes: u64 = 0;
+        let mut files = Vec::new();
+
+        for &place in &self.by_size {
+            let kept = &self.files[place];
+            let Some(time) = kept.last_used.filter(|&time| in_span(time)) else {
+                continue;
+            };
+
+            if total >= query.offset && files.len() < rows {
+                files.push(UsageFileView::new(place as u64, &kept.file, time));
+            }
+            total += 1;
+            bytes = bytes.saturating_add(kept.file.size);
+        }
+
+        UsagePage {
+            total,
+            bytes,
+            offset: query.offset,
+            files,
+        }
+    }
+
+    pub(crate) fn indexed_path(&self, file: u64) -> Option<&Path> {
+        let kept = self.files.get(usize::try_from(file).ok()?)?;
+
+        Some(kept.file.path.as_path())
+    }
+
     pub(crate) fn file_path(&self, group: u64, file: u64) -> Option<&Path> {
         let group = self.groups.get(usize::try_from(group).ok()?)?;
         let file = group.files.get(usize::try_from(file).ok()?)?;
@@ -107,6 +195,18 @@ impl Results {
         // the order they were found.
         order.sort_by_key(|&place| Reverse(groups[place].reclaimable_bytes));
         self.by_savings = order;
+    }
+
+    fn order_by_size(&mut self) {
+        if self.by_size.len() == self.files.len() {
+            return;
+        }
+
+        let files = &self.files;
+        let mut order: Vec<usize> = (0..files.len()).collect();
+        // Stable: files of one size stay in the order the walk met them.
+        order.sort_by_key(|&place| Reverse(files[place].file.size));
+        self.by_size = order;
     }
 }
 
