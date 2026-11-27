@@ -6,11 +6,17 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use filesweep_core::{DuplicateFile, DuplicateGroup, Independence, ScanSummary, Skip, SkipReason};
+use filesweep_core::{
+    DuplicateFile, DuplicateGroup, Independence, IndexedFile, ScanSummary, Skip, SkipReason,
+};
 use serde::{Deserialize, Serialize};
 
 /// The most rows one page carries, whatever the query asks for.
 pub const MAX_PAGE: u32 = 500;
+
+/// The most edges one history is counted between. More are left out, the
+/// latest first.
+pub const MAX_EDGES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,13 +298,106 @@ pub struct PageQuery {
     pub limit: u32,
 }
 
+/// When a file was last used is the latest time the file system gives for
+/// it: changed, opened or made. Windows often does not record opening, so
+/// "last used" can be older than the truth, never newer.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryQuery {
+    /// Milliseconds since 1970, in any order. A repeated edge counts once.
+    pub edges_ms: Vec<i64>,
+}
+
+/// How many files of a scan, and how many bytes, were last used between each
+/// two edges.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageHistory {
+    /// The edges counted between: ascending, each once.
+    pub edges_ms: Vec<i64>,
+    /// One more than edges: before the first edge, from each edge up to the
+    /// next, and from the last edge on. A time on an edge is in the later span.
+    pub spans: Vec<UsageSpan>,
+    /// Files the file system gave no time for. They are in no span and are
+    /// never listed.
+    pub undated: UsageSpan,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSpan {
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// Files last used in one span of time, the largest first.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageQuery {
+    /// Last used at this moment or later. Absent: no lower bound.
+    #[serde(default)]
+    pub from_ms: Option<i64>,
+    /// Last used before this moment. Absent: no upper bound.
+    #[serde(default)]
+    pub before_ms: Option<i64>,
+    pub offset: u64,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsagePage {
+    /// Files of the span asked for, not only the ones on this page.
+    pub total: u64,
+    /// Bytes of all of them.
+    pub bytes: u64,
+    pub offset: u64,
+    pub files: Vec<UsageFileView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageFileView {
+    /// The place of the file in the order the walk met it. Names the file
+    /// for the whole scan.
+    pub id: u64,
+    pub path: String,
+    pub name: String,
+    pub folder: String,
+    /// Bytes, as the listing gave them.
+    pub size: u64,
+    /// The latest of the times below. A file with none is never listed.
+    pub last_used_ms: i64,
+    pub modified_ms: Option<i64>,
+    pub accessed_ms: Option<i64>,
+    pub created_ms: Option<i64>,
+}
+
+impl UsageFileView {
+    pub(crate) fn new(id: u64, file: &IndexedFile, last_used_ms: i64) -> Self {
+        let path = file.path.as_path();
+
+        Self {
+            id,
+            path: shown(path),
+            name: shown(path.file_name().map_or(path, Path::new)),
+            folder: path.parent().map(shown).unwrap_or_default(),
+            size: file.size,
+            last_used_ms,
+            modified_ms: file.times.modified.map(unix_millis),
+            accessed_ms: file.times.accessed.map(unix_millis),
+            created_ms: file.times.created.map(unix_millis),
+        }
+    }
+}
+
 /// A path as text for the eye. Lossy for a name that is not Unicode, which is
 /// why nothing is ever done to a file by this text.
 pub(crate) fn shown(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn unix_millis(time: SystemTime) -> i64 {
+pub(crate) fn unix_millis(time: SystemTime) -> i64 {
     match time.duration_since(UNIX_EPOCH) {
         Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
         Err(before) => {

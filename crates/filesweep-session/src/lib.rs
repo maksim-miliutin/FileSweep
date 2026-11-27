@@ -23,6 +23,7 @@ mod view;
 pub use error::{QueryError, StartError};
 pub use session::{MAX_ROOTS, Session};
 pub use view::{
-    FileView, GroupPage, GroupQuery, GroupSort, GroupView, IndependenceView, MAX_PAGE, PageQuery,
-    Phase, ScanView, SkipCode, SkipPage, SkipView, State, Status, SummaryView,
+    FileView, GroupPage, GroupQuery, GroupSort, GroupView, HistoryQuery, IndependenceView,
+    MAX_EDGES, MAX_PAGE, PageQuery, Phase, ScanView, SkipCode, SkipPage, SkipView, State, Status,
+    SummaryView, UsageFileView, UsageHistory, UsagePage, UsageQuery, UsageSpan,
 };

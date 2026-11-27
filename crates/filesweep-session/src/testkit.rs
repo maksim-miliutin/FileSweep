@@ -9,8 +9,9 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use filesweep_core::{
-    ContentHash, DuplicateFile, DuplicateGroup, FileStamp, Independence, Outcome, RequestError,
-    ScanControl, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip, SkipReason,
+    ContentHash, DuplicateFile, DuplicateGroup, FileStamp, FileTimes, Independence, IndexedFile,
+    Outcome, RequestError, ScanControl, ScanEvent, ScanPolicy, ScanRequest, ScanSummary, Skip,
+    SkipReason,
 };
 
 use crate::error::StartError;
@@ -134,6 +135,16 @@ pub fn group(size: u64, reclaimable_bytes: u64) -> DuplicateGroup {
         files: vec![file("a"), file("b")],
         independence: Independence::Verified,
         reclaimable_bytes,
+    }
+}
+
+/// A file the walk indexed under the scripted root, with the times its
+/// listing gave.
+pub fn indexed(name: &str, size: u64, times: FileTimes) -> IndexedFile {
+    IndexedFile {
+        path: root().join(name),
+        size,
+        times,
     }
 }
 

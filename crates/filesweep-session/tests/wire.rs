@@ -12,8 +12,9 @@ use filesweep_core::{
     Outcome, ScanSummary, Skip, SkipReason,
 };
 use filesweep_session::{
-    FileView, GroupPage, GroupQuery, GroupSort, GroupView, PageQuery, Phase, QueryError, ScanView,
-    SkipCode, SkipPage, SkipView, StartError, State, Status, SummaryView,
+    FileView, GroupPage, GroupQuery, GroupSort, GroupView, HistoryQuery, PageQuery, Phase,
+    QueryError, ScanView, SkipCode, SkipPage, SkipView, StartError, State, Status, SummaryView,
+    UsageFileView, UsageHistory, UsagePage, UsageQuery, UsageSpan,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -369,6 +370,80 @@ fn queries_are_read_from_the_contract() {
             limit: 200,
         }
     );
+}
+
+#[test]
+fn usage_queries_are_read_from_the_contract() {
+    let examples = contract("queries.json");
+    let read_usage = |name: &str| -> UsageQuery {
+        serde_json::from_value(examples[name].clone()).unwrap_or_else(|err| panic!("{name}: {err}"))
+    };
+    let history: HistoryQuery =
+        serde_json::from_value(examples["history"].clone()).expect("the history query reads");
+
+    assert_eq!(
+        history,
+        HistoryQuery {
+            edges_ms: vec![1_577_836_800_000, 1_609_459_200_000],
+        }
+    );
+    // A bound the query leaves out is no bound at all.
+    assert_eq!(
+        read_usage("usedBefore"),
+        UsageQuery {
+            from_ms: None,
+            before_ms: Some(1_609_459_200_000),
+            offset: 0,
+            limit: 50,
+        }
+    );
+    assert_eq!(
+        read_usage("usedBetween"),
+        UsageQuery {
+            from_ms: Some(1_577_836_800_000),
+            before_ms: Some(1_609_459_200_000),
+            offset: 50,
+            limit: 50,
+        }
+    );
+}
+
+#[test]
+fn usage_history_matches_the_contract() {
+    let span = |files, bytes| UsageSpan { files, bytes };
+    let history = UsageHistory {
+        edges_ms: vec![1_577_836_800_000, 1_609_459_200_000],
+        spans: vec![
+            span(12, 3_145_728),
+            span(3, 1_048_576),
+            span(40, 52_428_800),
+        ],
+        undated: span(1, 512),
+    };
+
+    assert_eq!(wire(&history), contract("usage-history.json"));
+}
+
+#[test]
+fn usage_page_matches_the_contract() {
+    let page = UsagePage {
+        total: 12,
+        bytes: 3_145_728,
+        offset: 0,
+        files: vec![UsageFileView {
+            id: 7,
+            path: "/home/me/Downloads/old-installer.exe".into(),
+            name: "old-installer.exe".into(),
+            folder: "/home/me/Downloads".into(),
+            size: 2_097_152,
+            last_used_ms: 1_561_939_200_000,
+            modified_ms: Some(1_561_939_200_000),
+            accessed_ms: None,
+            created_ms: Some(1_546_300_800_000),
+        }],
+    };
+
+    assert_eq!(wire(&page), contract("usage-page.json"));
 }
 
 #[test]

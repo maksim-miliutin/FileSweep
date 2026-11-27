@@ -11,7 +11,8 @@ use filesweep_core::{
 use crate::error::{QueryError, StartError};
 use crate::results::Results;
 use crate::view::{
-    GroupPage, GroupQuery, PageQuery, Phase, ScanView, SkipPage, State, Status, SummaryView, shown,
+    GroupPage, GroupQuery, HistoryQuery, PageQuery, Phase, ScanView, SkipPage, State, Status,
+    SummaryView, UsageHistory, UsagePage, UsageQuery, shown,
 };
 
 pub const MAX_ROOTS: usize = 64;
@@ -197,6 +198,35 @@ impl Session {
         Ok(inner.scan_named(scan)?.results.skip_page(query))
     }
 
+    /// When the files of `scan` were last used, counted between the edges
+    /// of the query. Files arrive while the scan walks its folders; once the
+    /// phase is hashing, or the scan has ended, the count is final.
+    pub fn history(&self, scan: u64, query: &HistoryQuery) -> Result<UsageHistory, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        Ok(inner.scan_named(scan)?.results.history(query))
+    }
+
+    /// One page of the files of `scan` last used in the span the query
+    /// names, the largest first.
+    pub fn files_used(&self, scan: u64, query: &UsageQuery) -> Result<UsagePage, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        Ok(inner.scan_named(scan)?.results.usage_page(query))
+    }
+
+    /// The exact path of an indexed file, by the id its usage view carries.
+    pub fn indexed_path(&self, scan: u64, file: u64) -> Result<PathBuf, QueryError> {
+        let mut inner = lock(&self.shared);
+
+        inner
+            .scan_named(scan)?
+            .results
+            .indexed_path(file)
+            .map(Path::to_path_buf)
+            .ok_or(QueryError::NoSuchFile)
+    }
+
     /// The path of a file exactly as the scanner saw it, by the ids its view
     /// carries. This, and never the text shown for a path, is what an action
     /// on a file starts from.
@@ -277,8 +307,7 @@ impl Scan {
             }
             ScanEvent::Skipped(skip) => self.results.take_skip(skip),
             ScanEvent::Group(group) => self.results.take_group(group),
-            // Not kept yet: no question the session answers needs every file.
-            ScanEvent::Indexed(_) => {}
+            ScanEvent::Indexed(file) => self.results.take_file(file),
         }
     }
 

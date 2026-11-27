@@ -4,17 +4,19 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Sender, channel};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use filesweep_core::{Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanSummary};
+use filesweep_core::{
+    FileTimes, Outcome, Progress, RequestError, ScanEvent, ScanPolicy, ScanSummary,
+};
 use filesweep_core::{SkipReason, SkipReason::AccessDenied};
 
 use crate::error::{QueryError, StartError};
 use crate::session::{Engine, MAX_ROOTS, Session};
-use crate::testkit::{Director, PATIENCE, group, root, script, skip, summary};
+use crate::testkit::{Director, PATIENCE, group, indexed, root, script, skip, summary};
 use crate::view::{
-    GroupPage, GroupQuery, GroupSort, MAX_PAGE, PageQuery, Phase, SkipCode, State, Status,
-    SummaryView,
+    GroupPage, GroupQuery, GroupSort, HistoryQuery, MAX_EDGES, MAX_PAGE, PageQuery, Phase,
+    SkipCode, State, Status, SummaryView, UsageQuery, UsageSpan,
 };
 
 /// How long a test watches for something that must not happen.
@@ -801,4 +803,206 @@ fn results_stay_available_after_the_scan_ends() {
     assert_eq!(groups.map(|page| page.total), Ok(1));
     assert_eq!(skipped.map(|page| page.total), Ok(1));
     assert_eq!(session.file_path(scan, 0, 0), Ok(root().join("10-a")));
+}
+
+fn at(millis: u64) -> Option<SystemTime> {
+    Some(UNIX_EPOCH + Duration::from_millis(millis))
+}
+
+/// Times of a file that was changed at `millis` and never opened or made
+/// later, as far as the file system says.
+fn changed(millis: u64) -> FileTimes {
+    FileTimes {
+        modified: at(millis),
+        ..FileTimes::default()
+    }
+}
+
+fn span(files: u64, bytes: u64) -> UsageSpan {
+    UsageSpan { files, bytes }
+}
+
+fn history(session: &Session, edges_ms: &[i64]) -> crate::view::UsageHistory {
+    session
+        .history(
+            1,
+            &HistoryQuery {
+                edges_ms: edges_ms.to_vec(),
+            },
+        )
+        .expect("the scan is the one the session holds")
+}
+
+fn used(from_ms: Option<i64>, before_ms: Option<i64>, offset: u64, limit: u32) -> UsageQuery {
+    UsageQuery {
+        from_ms,
+        before_ms,
+        offset,
+        limit,
+    }
+}
+
+fn names(session: &Session, query: &UsageQuery) -> Vec<String> {
+    session
+        .files_used(1, query)
+        .expect("the scan is the one the session holds")
+        .files
+        .into_iter()
+        .map(|file| file.name)
+        .collect()
+}
+
+#[test]
+fn history_counts_each_file_by_the_latest_of_its_times() {
+    let session = Session::new();
+    let director = started(&session);
+    // Changed long ago but opened late: last used when it was opened.
+    director.emit(ScanEvent::Indexed(indexed(
+        "opened",
+        10,
+        FileTimes {
+            modified: at(500),
+            accessed: at(2500),
+            created: at(400),
+        },
+    )));
+    director.emit(ScanEvent::Indexed(indexed("old", 20, changed(500))));
+    // A copy made here after its content last changed.
+    director.emit(ScanEvent::Indexed(indexed(
+        "copied",
+        40,
+        FileTimes {
+            modified: at(500),
+            created: at(1500),
+            ..FileTimes::default()
+        },
+    )));
+    director.emit(ScanEvent::Indexed(indexed(
+        "timeless",
+        80,
+        FileTimes::default(),
+    )));
+
+    // Out of order and repeated, as a careless caller might send them.
+    let counted = history(&session, &[2000, 1000, 2000]);
+
+    assert_eq!(counted.edges_ms, vec![1000, 2000]);
+    assert_eq!(counted.spans, vec![span(1, 20), span(1, 40), span(1, 10),]);
+    assert_eq!(counted.undated, span(1, 80));
+}
+
+#[test]
+fn a_file_last_used_on_an_edge_is_in_the_later_span() {
+    let session = Session::new();
+    let director = started(&session);
+    director.emit(ScanEvent::Indexed(indexed("on the edge", 7, changed(1000))));
+
+    let counted = history(&session, &[1000]);
+
+    assert_eq!(counted.spans, vec![span(0, 0), span(1, 7)]);
+    assert!(names(&session, &used(None, Some(1000), 0, 10)).is_empty());
+    assert_eq!(
+        names(&session, &used(Some(1000), None, 0, 10)),
+        vec!["on the edge"]
+    );
+}
+
+#[test]
+fn files_of_a_span_come_largest_first_and_alike_sizes_as_walked() {
+    let session = Session::new();
+    let director = started(&session);
+    for (name, size, millis) in [
+        ("small", 10, 100),
+        ("big", 30, 200),
+        ("twin a", 20, 300),
+        ("twin b", 20, 400),
+        ("recent", 50, 5000),
+    ] {
+        director.emit(ScanEvent::Indexed(indexed(name, size, changed(millis))));
+    }
+    director.emit(ScanEvent::Indexed(indexed(
+        "timeless",
+        70,
+        FileTimes::default(),
+    )));
+
+    let old = session
+        .files_used(1, &used(None, Some(1000), 0, 10))
+        .expect("the scan is the one the session holds");
+
+    assert_eq!((old.total, old.bytes, old.offset), (4, 80, 0));
+    let rows: Vec<_> = old
+        .files
+        .iter()
+        .map(|file| (file.name.as_str(), file.id, file.size, file.last_used_ms))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("big", 1, 30, 200),
+            ("twin a", 2, 20, 300),
+            ("twin b", 3, 20, 400),
+            ("small", 0, 10, 100),
+        ]
+    );
+    assert_eq!(
+        names(&session, &used(None, Some(1000), 1, 2)),
+        vec!["twin a", "twin b"]
+    );
+    // A file with no time at all is in no span, however wide.
+    assert_eq!(
+        names(&session, &used(None, None, 0, 10)),
+        vec!["recent", "big", "twin a", "twin b", "small"]
+    );
+}
+
+#[test]
+fn a_usage_page_is_never_longer_than_the_most_a_page_carries() {
+    let session = Session::new();
+    let director = started(&session);
+    for place in 0..=u64::from(MAX_PAGE) {
+        director.emit(ScanEvent::Indexed(indexed(
+            &format!("file {place}"),
+            1,
+            changed(1),
+        )));
+    }
+
+    let page = session
+        .files_used(1, &used(None, None, 0, u32::MAX))
+        .expect("the scan is the one the session holds");
+
+    assert_eq!(page.files.len(), MAX_PAGE as usize);
+    assert_eq!(page.total, u64::from(MAX_PAGE) + 1);
+}
+
+#[test]
+fn edges_past_the_most_a_history_takes_are_left_out_the_latest_first() {
+    let session = Session::new();
+    let _director = started(&session);
+    let many = MAX_EDGES as i64 + 10;
+
+    let counted = history(&session, &(0..many).rev().collect::<Vec<_>>());
+
+    assert_eq!(counted.edges_ms, (0..MAX_EDGES as i64).collect::<Vec<_>>());
+    assert_eq!(counted.spans.len(), MAX_EDGES + 1);
+}
+
+#[test]
+fn an_indexed_file_is_found_again_by_its_id_and_only_in_its_own_scan() {
+    let session = Session::new();
+    let director = started(&session);
+    director.emit(ScanEvent::Indexed(indexed("kept.bin", 1, changed(1))));
+
+    assert_eq!(session.indexed_path(1, 0), Ok(root().join("kept.bin")));
+    assert_eq!(session.indexed_path(1, 1), Err(QueryError::NoSuchFile));
+    assert_eq!(session.indexed_path(2, 0), Err(QueryError::StaleScan));
+    assert_eq!(
+        session.history(2, &HistoryQuery { edges_ms: vec![] }),
+        Err(QueryError::StaleScan)
+    );
+    assert_eq!(
+        session.files_used(2, &used(None, None, 0, 10)),
+        Err(QueryError::StaleScan)
+    );
 }

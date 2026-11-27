@@ -1,0 +1,18 @@
+{
+  "total": 12,
+  "bytes": 3145728,
+  "offset": 0,
+  "files": [
+    {
+      "id": 7,
+      "path": "/home/me/Downloads/old-installer.exe",
+      "name": "old-installer.exe",
+      "folder": "/home/me/Downloads",
+      "size": 2097152,
+      "lastUsedMs": 1561939200000,
+      "modifiedMs": 1561939200000,
+      "accessedMs": null,
+      "createdMs": 1546300800000
+    }
+  ]
+}
