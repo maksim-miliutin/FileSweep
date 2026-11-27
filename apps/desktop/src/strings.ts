@@ -2,7 +2,7 @@
 // can be put beside this one.
 
 import type { RootKind, SkipReason } from "./backend/types";
-import { formatBytes, formatCount } from "./format";
+import { formatBytes, formatCount, formatDate } from "./format";
 
 function many(count: number, one: string, more: string): string
 {
@@ -94,6 +94,18 @@ export const text = {
 		`Groups ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`,
 	previousPage: "Previous page",
 	nextPage: "Next page",
+
+	usageHeading: "By last use",
+	usageNote: "When each file was last used, as far as Windows records it: the latest of when it was changed, opened or created. Windows often does not record opening, so a file may have been used later than it says here.",
+	usageYears: "Years of last use",
+	year: (year: number, before: boolean) => (before ? `Before ${String(year)}` : String(year)),
+	yearHolds: (files: number, bytes: number) => `${many(files, "file", "files")}, ${formatBytes(bytes)}`,
+	undated: (files: number) => `Left out, with no date at all: ${many(files, "file", "files")}.`,
+	usedIn: (year: number, before: boolean) =>
+		(before ? `Files last used before ${String(year)}` : `Files last used in ${String(year)}`),
+	filesShown: (first: number, last: number, total: number) =>
+		`Files ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`,
+	lastUsed: (ms: number) => `last used ${formatDate(ms)}`,
 
 	skippedHeading: "Skipped",
 	skippedList: "Skipped entries",

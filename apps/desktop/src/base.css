@@ -29,3 +29,9 @@ li {
 [role="alert"] {
 	font-weight: 600;
 }
+
+button[aria-pressed="true"] {
+	font-weight: 600;
+	outline: 2px solid currentColor;
+	outline-offset: -2px;
+}
