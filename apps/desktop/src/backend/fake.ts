@@ -3,6 +3,7 @@ import type {
 	GroupPage,
 	GroupQuery,
 	GroupView,
+	HistoryQuery,
 	PageQuery,
 	Phase,
 	ScanState,
@@ -12,11 +13,34 @@ import type {
 	SkipView,
 	Status,
 	SuggestedRoot,
+	UsageFileView,
+	UsageHistory,
+	UsagePage,
+	UsageQuery,
 } from "./types";
 import { BackendError } from "./types";
 
 /** The most rows a page carries, as in the session. */
 const MAX_PAGE = 500;
+
+/** The most edges a history is counted between, as in the session. */
+const MAX_EDGES = 64;
+
+/** A file the walk indexed, with the times its listing gave. */
+export interface IndexedSample
+{
+	path: string;
+	size: number;
+	modifiedMs: number | null;
+	accessedMs: number | null;
+	createdMs: number | null;
+}
+
+export interface RevealedIndexedFile
+{
+	scanId: number;
+	fileId: number;
+}
 
 interface Progress
 {
@@ -43,6 +67,8 @@ interface FakeScan
 	progress: Progress;
 	groups: GroupView[];
 	skipped: SkipView[];
+	/** In the order the walk met them: a file's place is its id. */
+	files: IndexedSample[];
 	error: string | null;
 }
 
@@ -55,6 +81,7 @@ export class FakeBackend implements Backend
 {
 	readonly calls: string[] = [];
 	readonly revealed: RevealedFile[] = [];
+	readonly revealedIndexed: RevealedIndexedFile[] = [];
 	picks: string[] = [];
 	suggestions: SuggestedRoot[] = [];
 
@@ -94,6 +121,11 @@ export class FakeBackend implements Backend
 		this.running("skip an entry").skipped.push(entry);
 	}
 
+	index(file: IndexedSample): void
+	{
+		this.running("index a file").files.push({ ...file });
+	}
+
 	end(state: "completed" | "cancelled" | "failed", error = "the scanner stopped unexpectedly"): void
 	{
 		const scan = this.running("end");
@@ -124,6 +156,7 @@ export class FakeBackend implements Backend
 				progress: { phase: "walking", filesSeen: 0, filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0 },
 				groups: [],
 				skipped: [],
+				files: [],
 				error: null,
 			};
 
@@ -187,6 +220,58 @@ export class FakeBackend implements Backend
 		});
 	}
 
+	history(scanId: number, query: HistoryQuery): Promise<UsageHistory>
+	{
+		return this.answer("history", () =>
+		{
+			const edges = [...new Set(query.edgesMs)].sort((a, b) => a - b).slice(0, MAX_EDGES);
+			const spans = Array.from({ length: edges.length + 1 }, () => ({ files: 0, bytes: 0 }));
+			const undated = { files: 0, bytes: 0 };
+
+			for (const file of this.named(scanId).files)
+			{
+				const used = lastUsed(file);
+				// As many edges lie at or before the time as spans before the one it falls in.
+				const span = used === null ? undated : spans[edges.filter(edge => edge <= used).length];
+				if (span !== undefined)
+				{
+					span.files += 1;
+					span.bytes += file.size;
+				}
+			}
+
+			return { edgesMs: edges, spans, undated };
+		});
+	}
+
+	filesUsed(scanId: number, query: UsageQuery): Promise<UsagePage>
+	{
+		return this.answer("filesUsed", () =>
+		{
+			const { fromMs, beforeMs } = query;
+			const rows: UsageFileView[] = [];
+
+			for (const [id, file] of this.named(scanId).files.entries())
+			{
+				const used = lastUsed(file);
+				if (used !== null && (fromMs === undefined || used >= fromMs) && (beforeMs === undefined || used < beforeMs))
+				{
+					rows.push(usageView(id, file, used));
+				}
+			}
+
+			// Array.sort is stable: files of one size stay in the order the walk met them.
+			rows.sort((a, b) => b.size - a.size);
+
+			return {
+				total: rows.length,
+				bytes: rows.reduce((sum, row) => sum + row.size, 0),
+				offset: query.offset,
+				files: page(rows, query),
+			};
+		});
+	}
+
 	pickFolders(): Promise<string[]>
 	{
 		return this.answer("pickFolders", () => [...this.picks]);
@@ -208,6 +293,19 @@ export class FakeBackend implements Backend
 			}
 
 			this.revealed.push({ scanId, groupId, fileId });
+		});
+	}
+
+	revealIndexed(scanId: number, fileId: number): Promise<void>
+	{
+		return this.answer("revealIndexed", () =>
+		{
+			if (this.named(scanId).files[fileId] === undefined)
+			{
+				throw new BackendError("noSuchFile", "the scan has no such group or file");
+			}
+
+			this.revealedIndexed.push({ scanId, fileId });
 		});
 	}
 
@@ -320,6 +418,38 @@ function page<T>(rows: readonly T[], query: PageQuery): T[]
 	return rows.slice(query.offset, query.offset + Math.min(query.limit, MAX_PAGE));
 }
 
+/** The latest time the listing gave for the file, or null when it gave none. */
+function lastUsed(file: IndexedSample): number | null
+{
+	const times = [file.modifiedMs, file.accessedMs, file.createdMs].filter(time => time !== null);
+
+	return times.length === 0 ? null : Math.max(...times);
+}
+
+function usageView(id: number, file: IndexedSample, lastUsedMs: number): UsageFileView
+{
+	// The fake holds Windows paths and Unix ones alike: either separator ends the folder.
+	const cut = Math.max(file.path.lastIndexOf("/"), file.path.lastIndexOf("\\"));
+
+	return {
+		id,
+		path: file.path,
+		name: file.path.slice(cut + 1),
+		folder: cut < 0 ? "" : file.path.slice(0, cut),
+		size: file.size,
+		lastUsedMs,
+		modifiedMs: file.modifiedMs,
+		accessedMs: file.accessedMs,
+		createdMs: file.createdMs,
+	};
+}
+
+/** A file changed at `modifiedMs` and, as far as its listing says, not opened or made later. */
+export function sampleFile(path: string, size: number, modifiedMs: number): IndexedSample
+{
+	return { path, size, modifiedMs, accessedMs: null, createdMs: null };
+}
+
 export function sampleGroup(size: number, reclaimableBytes: number): Omit<GroupView, "id">
 {
 	const file = (id: number, name: string) => ({
@@ -351,9 +481,12 @@ export function withOverrides(backend: Backend, overrides: Partial<Backend>): Ba
 		status: () => backend.status(),
 		groups: (scanId, query) => backend.groups(scanId, query),
 		skipped: (scanId, query) => backend.skipped(scanId, query),
+		history: (scanId, query) => backend.history(scanId, query),
+		filesUsed: (scanId, query) => backend.filesUsed(scanId, query),
 		pickFolders: () => backend.pickFolders(),
 		suggestedRoots: () => backend.suggestedRoots(),
 		reveal: (scanId, groupId, fileId) => backend.reveal(scanId, groupId, fileId),
+		revealIndexed: (scanId, fileId) => backend.revealIndexed(scanId, fileId),
 		...overrides,
 	};
 }

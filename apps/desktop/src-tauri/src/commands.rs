@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use filesweep_core::ScanPolicy;
 use filesweep_session::{
-    GroupPage, GroupQuery, PageQuery, QueryError, Session, SkipPage, StartError, Status,
+    GroupPage, GroupQuery, HistoryQuery, PageQuery, QueryError, Session, SkipPage, StartError,
+    Status, UsageHistory, UsagePage, UsageQuery,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime, State};
@@ -62,6 +63,24 @@ pub(crate) fn scan_skipped(
     query: PageQuery,
 ) -> Result<SkipPage, QueryError> {
     session.skipped(scan_id, &query)
+}
+
+#[tauri::command(async)]
+pub(crate) fn scan_history(
+    session: State<'_, Session>,
+    scan_id: u64,
+    query: HistoryQuery,
+) -> Result<UsageHistory, QueryError> {
+    session.history(scan_id, &query)
+}
+
+#[tauri::command(async)]
+pub(crate) fn scan_files_used(
+    session: State<'_, Session>,
+    scan_id: u64,
+    query: UsageQuery,
+) -> Result<UsagePage, QueryError> {
+    session.files_used(scan_id, &query)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -163,6 +182,19 @@ pub(crate) fn reveal_file(
     file_id: u64,
 ) -> Result<(), ShellError> {
     let path = session.file_path(scan_id, group_id, file_id)?;
+
+    (revealer.0)(&path).map_err(|message| ShellError::RevealFailed { message })
+}
+
+/// The same for a file of the usage pages, named by the id its row carries.
+#[tauri::command(async)]
+pub(crate) fn reveal_indexed_file(
+    session: State<'_, Session>,
+    revealer: State<'_, Revealer>,
+    scan_id: u64,
+    file_id: u64,
+) -> Result<(), ShellError> {
+    let path = session.indexed_path(scan_id, file_id)?;
 
     (revealer.0)(&path).map_err(|message| ShellError::RevealFailed { message })
 }

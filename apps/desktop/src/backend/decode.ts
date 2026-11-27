@@ -16,6 +16,10 @@ import type {
 	Status,
 	SuggestedRoot,
 	Summary,
+	UsageFileView,
+	UsageHistory,
+	UsagePage,
+	UsageSpan,
 } from "./types";
 import {
 	BACKEND_ERROR_CODES,
@@ -227,6 +231,56 @@ export function decodeSkipPage(value: unknown): SkipPage
 		total: read(from, "skipped", "total", count),
 		offset: read(from, "skipped", "offset", count),
 		items: read(from, "skipped", "items", listOf(skipView)),
+	};
+}
+
+const usageSpan: Decoder<UsageSpan> = (value, at) =>
+{
+	const from = fields(value, at);
+
+	return {
+		files: read(from, at, "files", count),
+		bytes: read(from, at, "bytes", count),
+	};
+};
+
+export function decodeUsageHistory(value: unknown): UsageHistory
+{
+	const from = fields(value, "history");
+
+	return {
+		edgesMs: read(from, "history", "edgesMs", listOf(integer)),
+		spans: read(from, "history", "spans", listOf(usageSpan)),
+		undated: read(from, "history", "undated", usageSpan),
+	};
+}
+
+const usageFileView: Decoder<UsageFileView> = (value, at) =>
+{
+	const from = fields(value, at);
+
+	return {
+		id: read(from, at, "id", count),
+		path: read(from, at, "path", text),
+		name: read(from, at, "name", text),
+		folder: read(from, at, "folder", text),
+		size: read(from, at, "size", count),
+		lastUsedMs: read(from, at, "lastUsedMs", integer),
+		modifiedMs: read(from, at, "modifiedMs", orNull(integer)),
+		accessedMs: read(from, at, "accessedMs", orNull(integer)),
+		createdMs: read(from, at, "createdMs", orNull(integer)),
+	};
+};
+
+export function decodeUsagePage(value: unknown): UsagePage
+{
+	const from = fields(value, "files");
+
+	return {
+		total: read(from, "files", "total", count),
+		bytes: read(from, "files", "bytes", count),
+		offset: read(from, "files", "offset", count),
+		files: read(from, "files", "files", listOf(usageFileView)),
 	};
 }
 

@@ -1,4 +1,15 @@
-import type { GroupPage, GroupQuery, PageQuery, SkipPage, Status, SuggestedRoot } from "./types";
+import type {
+	GroupPage,
+	GroupQuery,
+	HistoryQuery,
+	PageQuery,
+	SkipPage,
+	Status,
+	SuggestedRoot,
+	UsageHistory,
+	UsagePage,
+	UsageQuery,
+} from "./types";
 
 export interface StartOptions
 {
@@ -19,6 +30,9 @@ export interface Backend
 	status(): Promise<Status>;
 	groups(scanId: number, query: GroupQuery): Promise<GroupPage>;
 	skipped(scanId: number, query: PageQuery): Promise<SkipPage>;
+	/** Final once the scan hashes or has ended: files arrive while it walks its folders. */
+	history(scanId: number, query: HistoryQuery): Promise<UsageHistory>;
+	filesUsed(scanId: number, query: UsageQuery): Promise<UsagePage>;
 
 	/** An empty list means the user changed their mind. */
 	pickFolders(): Promise<string[]>;
@@ -29,4 +43,6 @@ export interface Backend
 	 * is named by the ids of the page it came in, never by its path.
 	 */
 	reveal(scanId: number, groupId: number, fileId: number): Promise<void>;
+	/** The same for a file of the usage pages, by the id its row carries. */
+	revealIndexed(scanId: number, fileId: number): Promise<void>;
 }

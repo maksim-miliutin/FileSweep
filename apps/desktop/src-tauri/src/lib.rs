@@ -26,8 +26,11 @@ fn shell<R: tauri::Runtime>(builder: tauri::Builder<R>, revealer: Revealer) -> t
             commands::scan_status,
             commands::scan_groups,
             commands::scan_skipped,
+            commands::scan_history,
+            commands::scan_files_used,
             commands::suggested_roots,
             commands::reveal_file,
+            commands::reveal_indexed_file,
         ])
 }
 
