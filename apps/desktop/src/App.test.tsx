@@ -5,6 +5,7 @@ import { App } from "./App";
 import type { Backend } from "./backend/backend";
 import type { IndexedSample } from "./backend/fake";
 import { FakeBackend, sampleFile, sampleGroup, withOverrides } from "./backend/fake";
+import type { GroupPage } from "./backend/types";
 import { BackendError } from "./backend/types";
 import { POLL_MS } from "./useScan";
 
@@ -621,6 +622,82 @@ test("the skipped entries come in pages too, and are counted by reason", async (
 	expect(region("Skipped").textContent).toContain("Entries 51–60 of 60");
 });
 
+test("a new scan starts its groups from the first page", async () =>
+{
+	const fake = new FakeBackend();
+	await scanStarted(fake);
+	for (let size = 60; size > 0; size -= 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+	fireEvent.click(turn("Duplicates", "Next page"));
+	await pass();
+	expect(region("Duplicates").textContent).toContain("Groups 51–60 of 60");
+
+	fireEvent.click(button("Scan"));
+	await pass();
+	for (let size = 60; size > 0; size -= 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	fake.end("completed");
+	await pass(POLL_MS);
+	await pass();
+
+	expect(region("Duplicates").textContent).toContain("Groups 1–50 of 60");
+});
+
+/** Lets a held answer go, and everything that follows from it happen. */
+async function release(held: (() => void)[], place: number): Promise<void>
+{
+	act(() =>
+	{
+		held[place]?.();
+	});
+	await pass();
+}
+
+test("a page that comes late does not replace the page asked for after it", async () =>
+{
+	const fake = new FakeBackend();
+	const held: (() => void)[] = [];
+	const backend = withOverrides(fake, {
+		groups: (scanId, query) => new Promise<GroupPage>((resolve, reject) =>
+		{
+			held.push(() =>
+			{
+				fake.groups(scanId, query).then(resolve, reject);
+			});
+		}),
+	});
+	await opened(fake, ["/a"], backend);
+	fireEvent.click(button("Scan"));
+	await pass();
+	for (let size = 150; size > 0; size -= 1)
+	{
+		fake.find(sampleGroup(size, size));
+	}
+	fake.end("completed");
+	await pass(POLL_MS);
+	await release(held, 0);
+
+	// Two pages turned before either has come.
+	fireEvent.click(turn("Duplicates", "Next page"));
+	await pass();
+	fireEvent.click(turn("Duplicates", "Next page"));
+	await pass();
+	expect(held).toHaveLength(3);
+
+	await release(held, 2);
+	expect(region("Duplicates").textContent).toContain("Groups 101–150 of 150");
+
+	await release(held, 1);
+	expect(region("Duplicates").textContent).toContain("Groups 101–150 of 150");
+});
+
 test("a list of exactly one full page has no next page", async () =>
 {
 	const fake = new FakeBackend();
@@ -752,4 +829,26 @@ test("a scan with no file to tell of shows no usage", async () =>
 	await walkedThrough(fake, []);
 
 	expect(screen.queryByRole("region", { name: "By last use" })).toBeNull();
+});
+
+test("a new scan shows its usage from its own oldest year", async () =>
+{
+	const fake = new FakeBackend();
+	await walkedThrough(fake, FILES_OF_SOME_YEARS);
+	fireEvent.click(button("2019"));
+	await pass();
+	fake.end("completed");
+	await pass(POLL_MS);
+
+	fireEvent.click(button("Scan"));
+	await pass();
+	fake.index(sampleFile("/new/report.pdf", 1, midYear(2021)));
+	fake.index(sampleFile("/new/notes.txt", 1, midYear(2024)));
+	fake.report({ phase: "hashing" });
+	await pass(POLL_MS);
+	await pass();
+	await pass();
+
+	expect(button("2021").getAttribute("aria-pressed")).toBe("true");
+	expect(pathsIn("Files last used in 2021")).toEqual(["/new/report.pdf"]);
 });
