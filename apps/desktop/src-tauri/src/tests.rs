@@ -4,9 +4,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use filesweep_core::{DuplicateGroup, ScanEvent};
+use filesweep_core::{DuplicateGroup, FileTimes, ScanEvent};
 use filesweep_session::{Session, testkit};
 
 use crate::commands::{Revealer, RootKind, ShellError, SuggestedRoot, suggestions};
@@ -73,6 +73,24 @@ impl Window {
         let scan_id = started.scan.expect("a started scan is described").id;
 
         (scan_id, group, director)
+    }
+
+    /// A scripted scan that has indexed two files, one last changed at 1000
+    /// and one at 3000 milliseconds after 1970, and stands still.
+    fn scan_with_two_files(&self) -> (u64, testkit::Director) {
+        let session = self.app.state::<Session>();
+        let (started, director) = testkit::start_scripted(&session, vec![testkit::root()])
+            .expect("a scripted scan starts");
+        for (name, size, millis) in [("old.bin", 10, 1000), ("new.bin", 20, 3000)] {
+            let times = FileTimes {
+                modified: Some(UNIX_EPOCH + Duration::from_millis(millis)),
+                ..FileTimes::default()
+            };
+            director.emit(ScanEvent::Indexed(testkit::indexed(name, size, times)));
+        }
+        let scan_id = started.scan.expect("a started scan is described").id;
+
+        (scan_id, director)
     }
 
     /// Calls a command the way the interface does. `Err` is what the
@@ -142,7 +160,7 @@ fn every_command_in_the_contract_is_answered() {
     let window = window();
     let examples = contract("commands.json");
     let examples = examples.as_object().expect("the contract is an object");
-    assert_eq!(examples.len(), 9);
+    assert_eq!(examples.len(), 12);
 
     for (name, example) in examples {
         let command = example["command"].as_str().expect("a command has a name");
@@ -446,4 +464,49 @@ fn shell_refusals_have_the_shape_the_contract_lists() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn history_and_usage_pages_are_answered_through_the_ipc() {
+    let window = window();
+    let (scan_id, _director) = window.scan_with_two_files();
+
+    let history = window
+        .invoke(
+            "scan_history",
+            json!({ "scanId": scan_id, "query": { "edgesMs": [2000] } }),
+        )
+        .expect("the history of the current scan is given");
+    let page = window
+        .invoke(
+            "scan_files_used",
+            json!({ "scanId": scan_id, "query": { "beforeMs": 2000, "offset": 0, "limit": 50 } }),
+        )
+        .expect("a page of the current scan is given");
+
+    assert_eq!(history["edgesMs"], json!([2000]));
+    assert_eq!(
+        history["spans"],
+        json!([{ "files": 1, "bytes": 10 }, { "files": 1, "bytes": 20 }])
+    );
+    assert_eq!(page["total"], json!(1));
+    assert_eq!(page["files"][0]["name"], json!("old.bin"));
+    assert_eq!(page["files"][0]["lastUsedMs"], json!(1000));
+}
+
+#[test]
+fn a_file_of_the_usage_pages_is_revealed_at_its_exact_path() {
+    let window = window();
+    let (scan_id, _director) = window.scan_with_two_files();
+    let reveal = |scan_id: u64, file_id: u64| {
+        window.invoke(
+            "reveal_indexed_file",
+            json!({ "scanId": scan_id, "fileId": file_id }),
+        )
+    };
+
+    assert_eq!(reveal(scan_id, 1), Ok(Value::Null));
+    assert_eq!(reveal(scan_id, 2), Err(json!({ "code": "noSuchFile" })));
+    assert_eq!(reveal(scan_id + 1, 0), Err(json!({ "code": "staleScan" })));
+    assert_eq!(window.revealed(), vec![testkit::root().join("new.bin")]);
 }

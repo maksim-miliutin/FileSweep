@@ -8,6 +8,8 @@ import {
 	decodeSkipPage,
 	decodeStatus,
 	decodeSuggestedRoots,
+	decodeUsageHistory,
+	decodeUsagePage,
 } from "./decode";
 import { BackendError, PHASES, ROOT_KINDS, SCAN_STATES, SKIP_REASONS } from "./types";
 
@@ -39,6 +41,16 @@ describe("the examples both sides are held to", () =>
 	test("the skipped page decodes to exactly itself", () =>
 	{
 		expect(decodeSkipPage(contract("skipped-page.json"))).toEqual(contract("skipped-page.json"));
+	});
+
+	test("the usage history decodes to exactly itself", () =>
+	{
+		expect(decodeUsageHistory(contract("usage-history.json"))).toEqual(contract("usage-history.json"));
+	});
+
+	test("the usage page decodes to exactly itself", () =>
+	{
+		expect(decodeUsagePage(contract("usage-page.json"))).toEqual(contract("usage-page.json"));
 	});
 
 	// This is what makes the comparisons above notice a field added on the

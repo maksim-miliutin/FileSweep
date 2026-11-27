@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { decodeGroupPage, decodeSkipPage, decodeStatus } from "./decode";
-import { FakeBackend, sampleGroup, withOverrides } from "./fake";
+import { FakeBackend, sampleFile, sampleGroup, withOverrides } from "./fake";
 import { BackendError } from "./types";
 
 const options = { includeHidden: false };
@@ -212,4 +212,55 @@ test("a file of an earlier scan, or one the scan does not have, is refused and n
 	expect(await refusalOf(fake.reveal(scanId, 1, 0))).toMatchObject({ code: "noSuchFile" });
 	expect(await refusalOf(fake.reveal(scanId, 0, 2))).toMatchObject({ code: "noSuchFile" });
 	expect(fake.revealed).toEqual([]);
+});
+
+test("files are counted and listed by when they were last used, as the session does", async () =>
+{
+	const fake = new FakeBackend();
+	await fake.start(["/a"], options);
+	// Changed long ago but opened late: last used when it was opened.
+	fake.index({ path: "/a/opened", size: 10, modifiedMs: 500, accessedMs: 2500, createdMs: 400 });
+	fake.index(sampleFile("/a/old", 20, 500));
+	// A copy made here after its content last changed.
+	fake.index({ path: "/a/copied", size: 40, modifiedMs: 500, accessedMs: null, createdMs: 1500 });
+	fake.index({ path: "/a/timeless", size: 80, modifiedMs: null, accessedMs: null, createdMs: null });
+	fake.index(sampleFile("C:\\old\\twin", 20, 300));
+	fake.index(sampleFile("/a/bigger", 30, 200));
+
+	expect(await fake.history(1, { edgesMs: [2000, 1000, 2000] })).toEqual({
+		edgesMs: [1000, 2000],
+		spans: [{ files: 3, bytes: 70 }, { files: 1, bytes: 40 }, { files: 1, bytes: 10 }],
+		undated: { files: 1, bytes: 80 },
+	});
+	// A time on an edge belongs to the later span: the copy, made at 1500.
+	expect((await fake.history(1, { edgesMs: [1500] })).spans).toEqual([
+		{ files: 3, bytes: 70 },
+		{ files: 2, bytes: 50 },
+	]);
+
+	const old = await fake.filesUsed(1, { beforeMs: 1000, offset: 0, limit: 10 });
+	expect(old).toMatchObject({ total: 3, bytes: 70, offset: 0 });
+	// The largest first; files of one size in the order the walk met them.
+	expect(old.files.map(file => [file.name, file.folder, file.id, file.lastUsedMs])).toEqual([
+		["bigger", "/a", 5, 200],
+		["old", "/a", 1, 500],
+		["twin", "C:\\old", 4, 300],
+	]);
+
+	// A time on an edge belongs to the later span.
+	const middle = await fake.filesUsed(1, { fromMs: 1500, beforeMs: 2500, offset: 0, limit: 10 });
+	expect(middle.files.map(file => file.name)).toEqual(["copied"]);
+});
+
+test("a file of the usage pages is shown by its id, and only one of the current scan", async () =>
+{
+	const fake = new FakeBackend();
+	await fake.start(["/a"], options);
+	fake.index(sampleFile("/a/old", 1, 1));
+
+	await fake.revealIndexed(1, 0);
+
+	expect(await refusalOf(fake.revealIndexed(1, 1))).toMatchObject({ code: "noSuchFile" });
+	expect(await refusalOf(fake.revealIndexed(2, 0))).toMatchObject({ code: "staleScan" });
+	expect(fake.revealedIndexed).toEqual([{ scanId: 1, fileId: 0 }]);
 });

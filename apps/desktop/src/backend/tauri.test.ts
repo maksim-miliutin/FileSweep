@@ -62,11 +62,20 @@ test("every call sends the command and the arguments the contract lists", async 
 			answer: skipped,
 			call: backend => backend.skipped(1, { offset: 0, limit: 200 }),
 		},
+		history: {
+			answer: contract("usage-history.json"),
+			call: backend => backend.history(1, { edgesMs: [1_577_836_800_000, 1_609_459_200_000] }),
+		},
+		filesUsed: {
+			answer: contract("usage-page.json"),
+			call: backend => backend.filesUsed(1, { beforeMs: 1_609_459_200_000, offset: 0, limit: 50 }),
+		},
 		suggestedRoots: {
 			answer: contract("suggested-roots.json"),
 			call: backend => backend.suggestedRoots(),
 		},
 		reveal: { answer: null, call: backend => backend.reveal(1, 2, 3) },
+		revealIndexed: { answer: null, call: backend => backend.revealIndexed(1, 3) },
 	};
 
 	expect(Object.keys(ask).sort()).toEqual(Object.keys(examples).sort());

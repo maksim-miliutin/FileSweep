@@ -142,6 +142,68 @@ export interface SkipView
 	detail: string | null;
 }
 
+/**
+ * When a file was last used is the latest time the file system gives for it:
+ * changed, opened or made. Windows often does not record opening, so "last
+ * used" can be older than the truth, never newer.
+ */
+export interface UsageHistory
+{
+	/** Milliseconds since 1970, ascending, each once: the edges counted between. */
+	edgesMs: number[];
+	/** One more than edges: before the first, from each edge up to the next, and from the last on. */
+	spans: UsageSpan[];
+	/** Files with no time at all. They are in no span and never listed. */
+	undated: UsageSpan;
+}
+
+export interface UsageSpan
+{
+	files: number;
+	bytes: number;
+}
+
+export interface UsagePage
+{
+	/** Files of the span asked for, not only the ones on this page. */
+	total: number;
+	/** Bytes of all of them. */
+	bytes: number;
+	offset: number;
+	/** The largest first. */
+	files: UsageFileView[];
+}
+
+export interface UsageFileView
+{
+	/** The place of the file in the order the walk met it; names it for the whole scan. */
+	id: number;
+	path: string;
+	name: string;
+	folder: string;
+	size: number;
+	/** The latest of the three times below. */
+	lastUsedMs: number;
+	modifiedMs: number | null;
+	accessedMs: number | null;
+	createdMs: number | null;
+}
+
+export interface HistoryQuery
+{
+	/** In any order; a repeated edge counts once. */
+	edgesMs: number[];
+}
+
+/** A bound that is left out is no bound. A time on an edge belongs to the later span. */
+export interface UsageQuery
+{
+	fromMs?: number;
+	beforeMs?: number;
+	offset: number;
+	limit: number;
+}
+
 export type GroupSort = "savings" | "found";
 
 export interface GroupQuery

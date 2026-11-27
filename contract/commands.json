@@ -15,9 +15,21 @@
     "command": "scan_skipped",
     "payload": { "scanId": 1, "query": { "offset": 0, "limit": 200 } }
   },
+  "history": {
+    "command": "scan_history",
+    "payload": { "scanId": 1, "query": { "edgesMs": [1577836800000, 1609459200000] } }
+  },
+  "filesUsed": {
+    "command": "scan_files_used",
+    "payload": { "scanId": 1, "query": { "beforeMs": 1609459200000, "offset": 0, "limit": 50 } }
+  },
   "suggestedRoots": { "command": "suggested_roots", "payload": {} },
   "reveal": {
     "command": "reveal_file",
     "payload": { "scanId": 1, "groupId": 2, "fileId": 3 }
+  },
+  "revealIndexed": {
+    "command": "reveal_indexed_file",
+    "payload": { "scanId": 1, "fileId": 3 }
   }
 }
