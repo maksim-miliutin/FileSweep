@@ -5,6 +5,12 @@ export function formatCount(count: number): string
 	return count.toLocaleString("en-US");
 }
 
+/** A day by the clock of this computer, such as Jun 15, 2019. */
+export function formatDate(ms: number): string
+{
+	return new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
 /** A size the way Windows tells it: steps of 1024 under the names KB, MB and GB. */
 export function formatBytes(bytes: number): string
 {

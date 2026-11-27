@@ -4,9 +4,11 @@ import type { Backend } from "./backend/backend";
 import type { GroupView, SkipReason, SkipView, Status, SuggestedRoot } from "./backend/types";
 import { BackendError } from "./backend/types";
 import { copyText } from "./clipboard";
-import { formatCount } from "./format";
+import { formatBytes, formatCount } from "./format";
 import { text } from "./strings";
 import { groupOrder, isRunning, PAGE_ROWS, useRows, useScan } from "./useScan";
+import type { Usage } from "./useUsage";
+import { useUsage } from "./useUsage";
 
 interface AppProps
 {
@@ -39,7 +41,8 @@ export function App({ backend }: AppProps)
 	const groupsAt = groupPage?.list === groupList ? groupPage.page : 0;
 	const skippedAt = skipPage?.list === skipList ? skipPage.page : 0;
 	const rows = useRows(backend, scan.status, groupsAt, skippedAt);
-	const error = scan.error ?? folderError ?? rows.error;
+	const usage = useUsage(backend, scan.status);
+	const error = scan.error ?? folderError ?? rows.error ?? usage.error;
 	const offers = suggestions.filter(offer => !folders.includes(offer.path));
 
 	useEffect(() =>
@@ -214,6 +217,14 @@ export function App({ backend }: AppProps)
 				</section>
 			)}
 
+			{usage.spans !== null && scanId !== null && (
+				<UsageSection
+					usage={usage}
+					spans={usage.spans}
+					onReveal={async fileId => backend.revealIndexed(scanId, fileId)}
+				/>
+			)}
+
 			{rows.skipped !== null && (
 				<section aria-labelledby="skipped-heading">
 					<h2 id="skipped-heading">{text.skippedHeading}</h2>
@@ -297,6 +308,65 @@ function Group({ group, onReveal }: { group: GroupView; onReveal: (fileId: numbe
 				))}
 			</ul>
 		</li>
+	);
+}
+
+interface UsageSectionProps
+{
+	usage: Usage;
+	spans: NonNullable<Usage["spans"]>;
+	onReveal: (fileId: number) => Promise<void>;
+}
+
+function UsageSection({ usage, spans, onReveal }: UsageSectionProps)
+{
+	const shown = usage.selected === null ? undefined : spans[usage.selected];
+	const page = usage.page;
+
+	return (
+		<section aria-labelledby="usage-heading">
+			<h2 id="usage-heading">{text.usageHeading}</h2>
+			<p>{text.usageNote}</p>
+			<ul aria-label={text.usageYears}>
+				{spans.map((span, place) => (
+					<li key={`${String(span.year)}:${String(span.before)}`}>
+						<button
+							type="button"
+							aria-pressed={place === usage.selected}
+							disabled={span.files === 0}
+							onClick={() =>
+							{
+								usage.select(place);
+							}}
+						>
+							{text.year(span.year, span.before)}
+						</button>
+						{" "}
+						{text.yearHolds(span.files, span.bytes)}
+					</li>
+				))}
+			</ul>
+			{usage.undated > 0 && <p>{text.undated(usage.undated)}</p>}
+			{shown !== undefined && page !== null && (
+				<>
+					<ul aria-label={text.usedIn(shown.year, shown.before)}>
+						{page.files.map(file => (
+							<li key={file.id}>
+								{file.path}
+								{`, ${formatBytes(file.size)}, ${text.lastUsed(file.lastUsedMs)} `}
+								<FileActions path={file.path} onReveal={async () => onReveal(file.id)} />
+							</li>
+						))}
+					</ul>
+					<Pager
+						told={text.filesShown(page.offset + 1, page.offset + page.files.length, page.total)}
+						page={usage.pageNumber}
+						total={page.total}
+						onTurn={usage.turn}
+					/>
+				</>
+			)}
+		</section>
 	);
 }
 

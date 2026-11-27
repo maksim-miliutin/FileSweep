@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
 import type { Backend } from "./backend/backend";
-import { FakeBackend, sampleGroup, withOverrides } from "./backend/fake";
+import type { IndexedSample } from "./backend/fake";
+import { FakeBackend, sampleFile, sampleGroup, withOverrides } from "./backend/fake";
 import { BackendError } from "./backend/types";
 import { POLL_MS } from "./useScan";
 
@@ -633,4 +634,122 @@ test("a list of exactly one full page has no next page", async () =>
 	await pass();
 
 	expect(turn("Duplicates", "Next page").disabled).toBe(true);
+});
+
+/** Mid-June of `year` by the clock of this computer: that year in every time zone. */
+function midYear(year: number): number
+{
+	return new Date(year, 5, 15).getTime();
+}
+
+/**
+ * A scan that has walked its folders and found `files`, in a window opened
+ * in June 2026: the years shown are 2017 to 2026, and before them the rest.
+ */
+async function walkedThrough(fake: FakeBackend, files: IndexedSample[]): Promise<void>
+{
+	vi.setSystemTime(new Date(2026, 5, 15));
+	await scanStarted(fake);
+	for (const file of files)
+	{
+		fake.index(file);
+	}
+	fake.report({ phase: "hashing" });
+	// The status, then the history it makes ready, then the files of a year.
+	await pass(POLL_MS);
+	await pass();
+	await pass();
+}
+
+const FILES_OF_SOME_YEARS: IndexedSample[] = [
+	sampleFile("/old/setup.exe", 3 * 1024, midYear(2010)),
+	sampleFile("/old/photo.jpg", 1024, midYear(2019)),
+	sampleFile("/old/video.mov", 2 * 1024, midYear(2019)),
+	{ path: "/old/no-date.bin", size: 1, modifiedMs: null, accessedMs: null, createdMs: null },
+];
+
+function pathsIn(list: string): (string | null | undefined)[]
+{
+	return rowsIn(list).map(item => item.firstChild?.textContent);
+}
+
+test("files are counted by the year of their last use once the walk is over", async () =>
+{
+	const fake = new FakeBackend();
+	vi.setSystemTime(new Date(2026, 5, 15));
+	await scanStarted(fake);
+	for (const file of FILES_OF_SOME_YEARS)
+	{
+		fake.index(file);
+	}
+	await pass(POLL_MS);
+	// Files are still coming in while the scan walks its folders.
+	expect(screen.queryByRole("region", { name: "By last use" })).toBeNull();
+
+	fake.report({ phase: "hashing" });
+	await pass(POLL_MS);
+	await pass();
+
+	const years = rowsIn("Years of last use").map(item => item.textContent);
+	expect(years).toHaveLength(11);
+	expect(years[0]).toBe("Before 2017 1 file, 3 KB");
+	expect(years[3]).toBe("2019 2 files, 3 KB");
+	expect(years[10]).toBe("2026 0 files, 0 bytes");
+	expect(button("2026").disabled).toBe(true);
+	expect(region("By last use").textContent).toContain("Left out, with no date at all: 1 file.");
+});
+
+test("the oldest year with files is on show, and another year when it is chosen", async () =>
+{
+	const fake = new FakeBackend();
+	await walkedThrough(fake, FILES_OF_SOME_YEARS);
+
+	expect(button("Before 2017").getAttribute("aria-pressed")).toBe("true");
+	expect(pathsIn("Files last used before 2017")).toEqual(["/old/setup.exe"]);
+
+	fireEvent.click(button("2019"));
+	await pass();
+
+	expect(button("2019").getAttribute("aria-pressed")).toBe("true");
+	// The largest first.
+	expect(pathsIn("Files last used in 2019")).toEqual(["/old/video.mov", "/old/photo.jpg"]);
+	expect(screen.queryByRole("list", { name: "Files last used before 2017" })).toBeNull();
+});
+
+test("a file of a year is shown in its folder by its id, not by its path", async () =>
+{
+	const fake = new FakeBackend();
+	await walkedThrough(fake, FILES_OF_SOME_YEARS);
+
+	fireEvent.click(within(rowsIn("Files last used before 2017")[0] ?? document.body).getByRole("button", { name: "Show in folder" }));
+	await pass();
+
+	expect(fake.revealedIndexed).toEqual([{ scanId: 1, fileId: 0 }]);
+});
+
+test("a year of many files comes in pages of 50", async () =>
+{
+	const fake = new FakeBackend();
+	const many: IndexedSample[] = [];
+	for (let place = 0; place < 60; place += 1)
+	{
+		many.push(sampleFile(`/old/${String(place)}.bin`, 100 - place, midYear(2019)));
+	}
+	await walkedThrough(fake, many);
+
+	expect(region("By last use").textContent).toContain("Files 1–50 of 60");
+	fireEvent.click(turn("By last use", "Next page"));
+	await pass();
+
+	expect(region("By last use").textContent).toContain("Files 51–60 of 60");
+	expect(pathsIn("Files last used in 2019")[0]).toBe("/old/50.bin");
+	expect(turn("By last use", "Next page").disabled).toBe(true);
+});
+
+test("a scan with no file to tell of shows no usage", async () =>
+{
+	const fake = new FakeBackend();
+	await walkedThrough(fake, []);
+
+	expect(screen.queryByRole("region", { name: "By last use" })).toBeNull();
 });
