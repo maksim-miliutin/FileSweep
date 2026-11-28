@@ -34,6 +34,7 @@ export function App({ backend }: AppProps)
 	const { state } = scan.status;
 	const scanId = scan.status.scan?.id ?? null;
 	const running = isRunning(state);
+	const live = scan.status.scan;
 	const scanned = scan.status.scan?.roots ?? [];
 	const folders = chosen ?? scanned;
 	const groupList = `${String(scanId)}:${groupOrder(state)}`;
@@ -167,6 +168,7 @@ export function App({ backend }: AppProps)
 				<p>
 					<button
 						type="button"
+						className="primary"
 						disabled={running || folders.length === 0}
 						onClick={() =>
 						{
@@ -181,6 +183,10 @@ export function App({ backend }: AppProps)
 			<section aria-labelledby="scan-heading">
 				<h2 id="scan-heading">{text.scanHeading}</h2>
 				<p role="status">{describe(scan.status)}</p>
+				{running && live?.phase === "hashing" && live.bytesTotal > 0 && (
+					<progress aria-label={text.bytesRead} max={live.bytesTotal} value={live.bytesDone} />
+				)}
+				{!running && live !== null && live.groups > 0 && <p className="headline">{text.canBeFreed(live.reclaimableBytes)}</p>}
 				<p>
 					{state === "scanning" && <button type="button" onClick={scan.pause}>{text.pause}</button>}
 					{state === "paused" && <button type="button" onClick={scan.resume}>{text.resume}</button>}
@@ -322,6 +328,7 @@ function UsageSection({ usage, spans, onReveal }: UsageSectionProps)
 {
 	const shown = usage.selected === null ? undefined : spans[usage.selected];
 	const page = usage.page;
+	const most = Math.max(1, ...spans.map(span => span.bytes));
 
 	return (
 		<section aria-labelledby="usage-heading">
@@ -329,7 +336,7 @@ function UsageSection({ usage, spans, onReveal }: UsageSectionProps)
 			<p>{text.usageNote}</p>
 			<ul aria-label={text.usageYears}>
 				{spans.map((span, place) => (
-					<li key={`${String(span.year)}:${String(span.before)}`}>
+					<li key={`${String(span.year)}:${String(span.before)}`} className="year">
 						<button
 							type="button"
 							aria-pressed={place === usage.selected}
@@ -341,6 +348,9 @@ function UsageSection({ usage, spans, onReveal }: UsageSectionProps)
 						>
 							{text.year(span.year, span.before)}
 						</button>
+						<span className="bar" aria-hidden="true">
+							<span style={{ width: `${String((span.bytes / most) * 100)}%` }} />
+						</span>
 						{" "}
 						{text.yearHolds(span.files, span.bytes)}
 					</li>

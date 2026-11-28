@@ -72,6 +72,7 @@ export const text = {
 	scan: "Scan",
 
 	scanHeading: "Scan",
+	bytesRead: "Bytes read",
 	pause: "Pause",
 	resume: "Resume",
 	cancel: "Cancel",

@@ -1,37 +1,202 @@
-/* Only what a plain page needs to be readable. The look of the application
-   comes with its real interface. */
+/* One column, system font, quiet colours and one accent for the main
+   action. Colours follow the light or dark setting of Windows. */
 
 :root {
 	color-scheme: light dark;
+	--ground: #F7F7F7;
+	--surface: #FFFFFF;
+	--text: #1B1B1B;
+	--muted: #5F5F5F;
+	--line: #E3E3E3;
+	--edge: #C8C8C8;
+	--hover: #F0F0F0;
+	--accent: #0067C0;
+	--on-accent: #FFFFFF;
+	--chosen: #E5EEF8;
+	--alert: #A4262C;
+	accent-color: var(--accent);
 	font-family: "Segoe UI", system-ui, sans-serif;
-	line-height: 1.5;
+	font-size: 14px;
+	line-height: 1.45;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ground: #1F1F1F;
+		--surface: #2B2B2B;
+		--text: #F0F0F0;
+		--muted: #ADADAD;
+		--line: #383838;
+		--edge: #555555;
+		--hover: #343434;
+		--accent: #4CC2FF;
+		--on-accent: #1B1B1B;
+		--chosen: #23384A;
+		--alert: #FF99A4;
+	}
 }
 
 body {
 	margin: 0;
+	background: var(--ground);
+	color: var(--text);
 }
 
 main {
 	margin: 0 auto;
-	max-width: 60rem;
-	padding: 1.5rem;
+	max-width: 64rem;
+	padding: 1.5rem 2rem 3rem;
 }
 
-button {
-	font: inherit;
-	padding: 0.25rem 0.75rem;
+h1 {
+	margin: 0 0 1rem;
+	font-size: 1.5rem;
+	font-weight: 600;
+}
+
+h2 {
+	margin: 0 0 0.5rem;
+	font-size: 1.1rem;
+	font-weight: 600;
+}
+
+section {
+	padding: 1rem 0;
+	border-top: 1px solid var(--line);
+}
+
+p {
+	margin: 0 0 0.5rem;
+}
+
+ul {
+	list-style: none;
+	margin: 0 0 0.5rem;
+	padding: 0;
 }
 
 li {
 	overflow-wrap: anywhere;
 }
 
-[role="alert"] {
+/* Rows of a list are told apart by a thin line, not by bullets. */
+section > ul > li,
+li > ul > li {
+	padding: 0.35rem 0;
+	border-bottom: 1px solid var(--line);
+}
+
+li > ul {
+	margin: 0.25rem 0 0.25rem 1rem;
+}
+
+li > ul > li:last-child {
+	border-bottom: 0;
+}
+
+li > p {
+	margin: 0;
 	font-weight: 600;
 }
 
-button[aria-pressed="true"] {
+button {
+	font: inherit;
+	min-height: 2rem;
+	padding: 0 0.75rem;
+	color: inherit;
+	background: var(--surface);
+	border: 1px solid var(--edge);
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+	background: var(--hover);
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* The buttons inside a row are smaller than the ones that steer the scan. */
+li button {
+	min-height: 1.75rem;
+	padding: 0 0.5rem;
+	font-size: 0.9em;
+}
+
+button.primary {
+	min-width: 8rem;
 	font-weight: 600;
-	outline: 2px solid currentColor;
-	outline-offset: -2px;
+	color: var(--on-accent);
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+	background: var(--accent);
+	filter: brightness(1.1);
+}
+
+button[aria-pressed="true"] {
+	background: var(--chosen);
+	border-color: var(--accent);
+	font-weight: 600;
+}
+
+/* A year: its button, a bar as long as the space its files take next to
+   the fullest year, and the counts. */
+.year {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.year button {
+	min-width: 7rem;
+	text-align: left;
+}
+
+.bar {
+	flex: 0 0 14rem;
+	height: 0.75rem;
+	background: var(--line);
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.bar > span {
+	display: block;
+	height: 100%;
+	background: var(--muted);
+}
+
+.year button[aria-pressed="true"] + .bar > span {
+	background: var(--accent);
+}
+
+/* What the finished scan found, said once in large type. */
+.headline {
+	margin: 0.25rem 0 0.5rem;
+	font-size: 1.75rem;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+progress {
+	display: block;
+	width: 100%;
+	height: 0.5rem;
+	margin: 0.25rem 0 0.75rem;
+}
+
+[role="alert"] {
+	color: var(--alert);
+	font-weight: 600;
 }
