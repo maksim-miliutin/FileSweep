@@ -3,6 +3,7 @@
 
 import type { RootKind, SkipReason } from "./backend/types";
 import { formatBytes, formatCount, formatDate } from "./format";
+import type { UsedBy } from "./useUsage";
 
 function many(count: number, one: string, more: string): string
 {
@@ -14,6 +15,13 @@ const rootKinds: Record<RootKind, string> = {
 	desktop: "Desktop",
 	documents: "Documents",
 	pictures: "Pictures",
+};
+
+/** A last use, by the time it came from. */
+const usedHow: Record<UsedBy, string> = {
+	changed: "last changed",
+	created: "created",
+	opened: "last opened",
 };
 
 /** Short names for the counts by reason, inside a sentence. */
@@ -105,7 +113,7 @@ export const text = {
 		(before ? `Files last used before ${String(year)}` : `Files last used in ${String(year)}`),
 	filesShown: (first: number, last: number, total: number) =>
 		`Files ${formatCount(first)}–${formatCount(last)} of ${formatCount(total)}`,
-	lastUsed: (ms: number) => `last used ${formatDate(ms)}`,
+	lastUsed: (ms: number, how: UsedBy) => `${usedHow[how]} ${formatDate(ms)}`,
 
 	skippedHeading: "Skipped",
 	skippedList: "Skipped entries",
