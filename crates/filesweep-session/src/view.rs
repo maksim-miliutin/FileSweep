@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use filesweep_core::{
-    DuplicateFile, DuplicateGroup, Independence, IndexedFile, ScanSummary, Skip, SkipReason,
-};
+use filesweep_core::{DuplicateFile, DuplicateGroup, Independence, ScanSummary, Skip, SkipReason};
 use serde::{Deserialize, Serialize};
 
 /// The most rows one page carries, whatever the query asks for.
@@ -374,19 +372,18 @@ pub struct UsageFileView {
 }
 
 impl UsageFileView {
-    pub(crate) fn new(id: u64, file: &IndexedFile, last_used_ms: i64) -> Self {
-        let path = file.path.as_path();
-
+    /// A file with its last use and none of the times it came from.
+    pub(crate) fn new(id: u64, path: &Path, size: u64, last_used_ms: i64) -> Self {
         Self {
             id,
             path: shown(path),
             name: shown(path.file_name().map_or(path, Path::new)),
             folder: path.parent().map(shown).unwrap_or_default(),
-            size: file.size,
+            size,
             last_used_ms,
-            modified_ms: file.times.modified.map(unix_millis),
-            accessed_ms: file.times.accessed.map(unix_millis),
-            created_ms: file.times.created.map(unix_millis),
+            modified_ms: None,
+            accessed_ms: None,
+            created_ms: None,
         }
     }
 }
