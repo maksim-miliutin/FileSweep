@@ -2,8 +2,9 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::Path;
+use std::time::SystemTime;
 
-use filesweep_core::{DuplicateGroup, IndexedFile, Skip};
+use filesweep_core::{DuplicateGroup, FileTimes, IndexedFile, Skip};
 
 use crate::view::{
     GroupPage, GroupQuery, GroupSort, GroupView, HistoryQuery, MAX_EDGES, MAX_PAGE, PageQuery,
@@ -29,10 +30,34 @@ pub(crate) struct Results {
     by_size: Vec<usize>,
 }
 
+/// What is kept of an indexed file. A scan may index millions of them, so
+/// the times take eight bytes each and the path has no room to grow.
 struct Kept {
-    file: IndexedFile,
-    /// Milliseconds since 1970. `None` when the file system gave no time.
-    last_used: Option<i64>,
+    path: Box<Path>,
+    size: u64,
+    modified: Millis,
+    accessed: Millis,
+    created: Millis,
+    /// The latest of the three.
+    last_used: Millis,
+}
+
+/// Milliseconds since 1970, or no time at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Millis(i64);
+
+impl Millis {
+    /// The scanner gives no time at or before 1970, so the one value a real
+    /// time never takes stands for none.
+    const NONE: Self = Self(i64::MIN);
+
+    fn of(time: Option<SystemTime>) -> Self {
+        time.map_or(Self::NONE, |time| Self(unix_millis(time)))
+    }
+
+    fn get(self) -> Option<i64> {
+        (self != Self::NONE).then_some(self.0)
+    }
 }
 
 impl Results {
@@ -44,14 +69,21 @@ impl Results {
     }
 
     pub(crate) fn take_file(&mut self, file: IndexedFile) {
-        let times = file.times;
-        let last_used = [times.modified, times.accessed, times.created]
-            .into_iter()
-            .flatten()
-            .max()
-            .map(unix_millis);
+        let FileTimes {
+            modified,
+            accessed,
+            created,
+        } = file.times;
+        let latest = [modified, accessed, created].into_iter().flatten().max();
 
-        self.files.push(Kept { file, last_used });
+        self.files.push(Kept {
+            path: file.path.into_boxed_path(),
+            size: file.size,
+            modified: Millis::of(modified),
+            accessed: Millis::of(accessed),
+            created: Millis::of(created),
+            last_used: Millis::of(latest),
+        });
     }
 
     pub(crate) fn take_skip(&mut self, skip: Skip) {
@@ -117,14 +149,14 @@ impl Results {
         let mut spans = vec![UsageSpan::default(); edges.len() + 1];
         let mut undated = UsageSpan::default();
         for kept in &self.files {
-            let span = match kept.last_used {
+            let span = match kept.last_used.get() {
                 // As many edges lie at or before the time as spans before
                 // the one it falls in.
                 Some(time) => &mut spans[edges.partition_point(|&edge| edge <= time)],
                 None => &mut undated,
             };
             span.files += 1;
-            span.bytes = span.bytes.saturating_add(kept.file.size);
+            span.bytes = span.bytes.saturating_add(kept.size);
         }
 
         UsageHistory {
@@ -148,15 +180,20 @@ impl Results {
 
         for &place in &self.by_size {
             let kept = &self.files[place];
-            let Some(time) = kept.last_used.filter(|&time| in_span(time)) else {
+            let Some(time) = kept.last_used.get().filter(|&time| in_span(time)) else {
                 continue;
             };
 
             if total >= query.offset && files.len() < rows {
-                files.push(UsageFileView::new(place as u64, &kept.file, time));
+                files.push(UsageFileView {
+                    modified_ms: kept.modified.get(),
+                    accessed_ms: kept.accessed.get(),
+                    created_ms: kept.created.get(),
+                    ..UsageFileView::new(place as u64, &kept.path, kept.size, time)
+                });
             }
             total += 1;
-            bytes = bytes.saturating_add(kept.file.size);
+            bytes = bytes.saturating_add(kept.size);
         }
 
         UsagePage {
@@ -170,7 +207,7 @@ impl Results {
     pub(crate) fn indexed_path(&self, file: u64) -> Option<&Path> {
         let kept = self.files.get(usize::try_from(file).ok()?)?;
 
-        Some(kept.file.path.as_path())
+        Some(&kept.path)
     }
 
     pub(crate) fn file_path(&self, group: u64, file: u64) -> Option<&Path> {
@@ -205,7 +242,7 @@ impl Results {
         let files = &self.files;
         let mut order: Vec<usize> = (0..files.len()).collect();
         // Stable: files of one size stay in the order the walk met them.
-        order.sort_by_key(|&place| Reverse(files[place].file.size));
+        order.sort_by_key(|&place| Reverse(files[place].size));
         self.by_size = order;
     }
 }
@@ -217,4 +254,24 @@ fn window(offset: u64, limit: u32, len: usize) -> Range<usize> {
     let rows = limit.min(MAX_PAGE) as usize;
 
     start..start.saturating_add(rows).min(len)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use super::{Kept, Millis};
+
+    #[test]
+    fn a_kept_file_is_a_path_and_five_numbers() {
+        assert!(size_of::<Kept>() <= 56, "{} bytes", size_of::<Kept>());
+    }
+
+    #[test]
+    fn a_time_keeps_its_milliseconds_and_no_time_stays_none() {
+        let time = UNIX_EPOCH + Duration::from_millis(1_500);
+
+        assert_eq!(Millis::of(Some(time)).get(), Some(1_500));
+        assert_eq!(Millis::of(None).get(), None);
+    }
 }
