@@ -8,12 +8,12 @@ service, no telemetry.
 
 Early development. There is nothing to install yet.
 
-The first piece is the scanner, a Rust library that reads the folders you
-choose and reports files with identical content. It only reads: it never
-creates, changes, moves or deletes anything.
+What works: a scanner, a Rust library that reads the folders you choose and
+reports files with identical content, and a desktop window over it. Both only
+read: nothing is created, changed, moved or deleted.
 
-Planned after the scanner: a desktop interface, moving selected copies to the
-Recycle Bin after explicit confirmation, and finding visually similar photos.
+Planned: moving selected copies to the Recycle Bin after explicit
+confirmation, finding visually similar photos, and an installer.
 
 ## Building
 
@@ -45,14 +45,29 @@ You also need [Node.js](https://nodejs.org) 22 or newer.
 
 ```
 cd apps/desktop
-npm install
+npm ci
 npm run tauri dev
 ```
 
 The first run compiles the shell, which takes a few minutes. The window is a
-plain working page for now: choose folders, run a scan, pause or cancel it,
-and read the groups of identical files and the entries that were skipped. It
-removes nothing.
+plain working page for now. In it you can:
+
+- choose folders, or take the Downloads, Desktop, Documents and Pictures
+  folders it suggests, and run a scan, pause it or cancel it;
+- page through the groups of identical files, the most space first, and show
+  any file in its folder or copy its path;
+- see when the files were last used, year by year, the largest first within a
+  year;
+- read what was skipped and why, counted by reason.
+
+It removes nothing.
+
+"Last used" is the latest of when a file was changed, opened or created, as
+far as Windows records it. Windows often does not record opening: by default
+it stops doing so when the system drive is larger than 128 GB. So a file may
+have been used later than the window says. From an administrator command
+prompt, `fsutil behavior query disablelastaccess` tells how your computer is
+set.
 
 `npm run dev` alone serves the same page to a browser, where a demo backend
 plays a short scan from memory and no disk is read.

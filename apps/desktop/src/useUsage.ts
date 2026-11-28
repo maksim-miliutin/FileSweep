@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { Backend } from "./backend/backend";
-import type { Status, UsageHistory, UsagePage, UsageQuery } from "./backend/types";
+import type { Status, UsageFileView, UsageHistory, UsagePage, UsageQuery } from "./backend/types";
 import { BackendError } from "./backend/types";
 import { isRunning, PAGE_ROWS } from "./useScan";
 
@@ -31,6 +31,24 @@ export interface Usage
 	pageNumber: number;
 	turn: (page: number) => void;
 	error: Error | null;
+}
+
+/** Which of a file's times its last use is. */
+export type UsedBy = "changed" | "created" | "opened";
+
+/**
+ * The time a last use came from. When two times are the same moment, the one
+ * Windows records most surely is told: a change, then a creation, then an
+ * opening.
+ */
+export function usedBy(file: UsageFileView): UsedBy
+{
+	if (file.modifiedMs === file.lastUsedMs)
+	{
+		return "changed";
+	}
+
+	return file.createdMs === file.lastUsedMs ? "created" : "opened";
 }
 
 /** The first moment of each of the last `years` years, by the clock of this computer, oldest first. */

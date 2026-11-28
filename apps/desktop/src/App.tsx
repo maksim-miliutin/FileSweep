@@ -8,7 +8,7 @@ import { formatBytes, formatCount } from "./format";
 import { text } from "./strings";
 import { groupOrder, isRunning, PAGE_ROWS, useRows, useScan } from "./useScan";
 import type { Usage } from "./useUsage";
-import { useUsage } from "./useUsage";
+import { usedBy, useUsage } from "./useUsage";
 
 interface AppProps
 {
@@ -353,7 +353,7 @@ function UsageSection({ usage, spans, onReveal }: UsageSectionProps)
 						{page.files.map(file => (
 							<li key={file.id}>
 								{file.path}
-								{`, ${formatBytes(file.size)}, ${text.lastUsed(file.lastUsedMs)} `}
+								{`, ${formatBytes(file.size)}, ${text.lastUsed(file.lastUsedMs, usedBy(file))} `}
 								<FileActions path={file.path} onReveal={async () => onReveal(file.id)} />
 							</li>
 						))}
