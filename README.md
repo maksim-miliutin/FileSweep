@@ -4,13 +4,21 @@ FileSweep is a free Windows application for finding duplicate files and
 removing the extra copies safely. It works offline: no account, no cloud
 service, no telemetry.
 
+## Download
+
+Version 0.1.0 is on the
+[Releases](https://github.com/maksim-miliutin/FileSweep/releases) page:
+`FileSweep-0.1.0-x64.exe`, one file with nothing to install. It runs on
+Windows 10 and 11 and uses the WebView2 runtime they come with. The file is
+not signed, so Windows SmartScreen may warn the first time it starts: "More
+info", then "Run anyway".
+
 ## Status
 
-Early development. There is nothing to install yet.
-
 What works: a scanner, a Rust library that reads the folders you choose and
-reports files with identical content, and a desktop window over it. Both only
-read: nothing is created, changed, moved or deleted.
+reports files with identical content and when each file was last used, and a
+desktop window over it. Both only read: nothing is created, changed, moved or
+deleted.
 
 Planned: moving selected copies to the Recycle Bin after explicit
 confirmation (the rules are in [docs/recycle-bin.md](docs/recycle-bin.md)),
@@ -50,8 +58,8 @@ npm ci
 npm run tauri dev
 ```
 
-The first run compiles the shell, which takes a few minutes. The window is a
-plain working page for now. In it you can:
+The first run compiles the shell, which takes a few minutes. In the window
+you can:
 
 - choose folders, or take the Downloads, Desktop, Documents and Pictures
   folders it suggests, and run a scan, pause it or cancel it;
@@ -72,6 +80,10 @@ set.
 
 `npm run dev` alone serves the same page to a browser, where a demo backend
 plays a short scan from memory and no disk is read.
+
+`npm run tauri build` makes the release program,
+`target/release/filesweep-desktop.exe` in the repository folder, with the
+page built into it.
 
 The checks of the interface code, from the same folder:
 
