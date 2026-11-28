@@ -79,12 +79,11 @@ function asError(failure: unknown): Error
 
 /**
  * Files arrive while the scan walks its folders, so the history is asked for
- * once the walk is over, once per scan. The years are those of the moment
- * the window opened.
+ * once the walk is over, once per scan. The years are those of that moment:
+ * a window left open over New Year counts the next scan in the new years.
  */
 export function useUsage(backend: Backend, status: Status): Usage
 {
-	const [edges] = useState(() => yearEdges(new Date()));
 	const [history, setHistory] = useState<Kept<UsageHistory> | null>(null);
 	const [files, setFiles] = useState<Kept<UsagePage> | null>(null);
 	const [choice, setChoice] = useState<Choice | null>(null);
@@ -112,7 +111,7 @@ export function useUsage(backend: Backend, status: Status): Usage
 		}
 
 		let outdated = false;
-		backend.history(scanId, { edgesMs: edges }).then((answer) =>
+		backend.history(scanId, { edgesMs: yearEdges(new Date()) }).then((answer) =>
 		{
 			if (!outdated)
 			{
@@ -125,7 +124,7 @@ export function useUsage(backend: Backend, status: Status): Usage
 		{
 			outdated = true;
 		};
-	}, [backend, edges, report, scanId, walked]);
+	}, [backend, report, scanId, walked]);
 
 	const kept = history !== null && history.key === String(scanId) ? history.value : null;
 	// A scan with no file to tell of has no usage to show.

@@ -738,6 +738,24 @@ async function walkedThrough(fake: FakeBackend, files: IndexedSample[]): Promise
 	await pass();
 }
 
+test("the years are those of the end of the walk, not of the opening of the window", async () =>
+{
+	const fake = new FakeBackend();
+	vi.setSystemTime(new Date(2026, 11, 31));
+	await scanStarted(fake);
+	fake.index(sampleFile("/new/notes.txt", 10, midYear(2027)));
+
+	vi.setSystemTime(new Date(2027, 0, 2));
+	fake.report({ phase: "hashing" });
+	await pass(POLL_MS);
+	await pass();
+	await pass();
+
+	const years = rowsIn("Years of last use").map(item => item.textContent);
+	expect(years[0]).toBe("Before 2018 0 files, 0 bytes");
+	expect(years[10]).toBe("2027 1 file, 10 bytes");
+});
+
 const FILES_OF_SOME_YEARS: IndexedSample[] = [
 	sampleFile("/old/setup.exe", 3 * 1024, midYear(2010)),
 	sampleFile("/old/photo.jpg", 1024, midYear(2019)),
