@@ -105,4 +105,4 @@ and a summary. It changes nothing on disk.
 
 ## License
 
-Not chosen yet. A `LICENSE` file will be added before the first release.
+MIT. See [LICENSE](LICENSE).
