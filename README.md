@@ -13,7 +13,8 @@ reports files with identical content, and a desktop window over it. Both only
 read: nothing is created, changed, moved or deleted.
 
 Planned: moving selected copies to the Recycle Bin after explicit
-confirmation, finding visually similar photos, and an installer.
+confirmation (the rules are in [docs/recycle-bin.md](docs/recycle-bin.md)),
+finding visually similar photos, and an installer.
 
 ## Building
 
